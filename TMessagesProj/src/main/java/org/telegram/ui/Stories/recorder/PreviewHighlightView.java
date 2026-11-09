@@ -77,7 +77,7 @@ public class PreviewHighlightView extends FrameLayout {
         CharSequence text = UserObject.getUserName(me);
         text = Emoji.replaceEmoji(text, headerView.titleView.getPaint().getFontMetricsInt(), false);
         headerView.titleView.setText(text);
-        headerView.setSubtitle(LocaleController.getString("RightNow", R.string.RightNow), false);
+        headerView.setSubtitle(LocaleController.getString(R.string.RightNow), false);
         top.addView(headerView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL, 0, 17, 0, 0));
 
         ImageView closeIconView = new ImageView(context);
@@ -110,7 +110,7 @@ public class PreviewHighlightView extends FrameLayout {
         TextView editText = new TextView(context);
         editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         editText.setTextColor(1694498815);
-        editText.setText(LocaleController.getString("ReplyPrivately", R.string.ReplyPrivately));
+        editText.setText(LocaleController.getString(R.string.ReplyPrivately));
         editLayout.addView(editText, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 24, 0, 24, 0));
 
 //        ImageView likeButton = new ImageView(context);
@@ -134,6 +134,8 @@ public class PreviewHighlightView extends FrameLayout {
 
         top.setAlpha(0f);
         bottom.setAlpha(0f);
+
+        setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
     }
 
     public void updateCount() {
@@ -143,7 +145,7 @@ public class PreviewHighlightView extends FrameLayout {
 
     public void updateCaption(CharSequence caption) {
         caption = AnimatedEmojiSpan.cloneSpans(new SpannableString(caption));
-        storyCaptionView.captionTextview.setText(caption, null, false, false);
+        storyCaptionView.captionTextview.setText(caption, null, null, false, false);
     }
 
     private boolean shownTop = false, shownBottom = false;

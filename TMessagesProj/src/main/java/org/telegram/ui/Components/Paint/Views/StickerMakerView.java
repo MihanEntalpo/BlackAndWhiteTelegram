@@ -2,6 +2,7 @@ package org.telegram.ui.Components.Paint.Views;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.lerp;
+import static org.telegram.messenger.LocaleController.getString;
 
 import android.animation.ValueAnimator;
 import android.annotation.SuppressLint;
@@ -23,7 +24,6 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.os.Build;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -44,7 +44,6 @@ import com.google.mlkit.vision.segmentation.subject.SubjectSegmentation;
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenter;
 import com.google.mlkit.vision.segmentation.subject.SubjectSegmenterOptions;
 
-import org.checkerframework.checker.units.qual.A;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.EmuDetector;
@@ -57,6 +56,7 @@ import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SendMessagesHelper;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
@@ -71,7 +71,6 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Paint.ObjectDetectionEmojis;
 import org.telegram.ui.Components.ThanosEffect;
-import org.telegram.ui.Stories.DarkThemeResourceProvider;
 import org.telegram.ui.Stories.recorder.DownloadButton;
 import org.telegram.ui.Stories.recorder.StoryEntry;
 
@@ -566,7 +565,7 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
             }
         });
 
-        actionTextView.setText(LocaleController.getString(R.string.SegmentationTabToCrop));
+        actionTextView.setText(getString(R.string.SegmentationTabToCrop));
         actionTextView.animate().cancel();
         actionTextView.animate().alpha(1f).scaleX(1f).scaleY(1f).setDuration(240).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).start();
         if (bordersAnimator != null) {
@@ -984,7 +983,7 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
 
         // preload emojis
         List<TLRPC.TL_availableReaction> defaultReactions = MediaDataController.getInstance(currentAccount).getEnabledReactionsList();
-        for (int i = 0; i <= Math.min(defaultReactions.size(), 8); ++i) {
+        for (int i = 0; i < Math.min(defaultReactions.size(), 9); ++i) {
             Emoji.getEmojiDrawable(defaultReactions.get(i).reaction);
         }
     }
@@ -1252,12 +1251,12 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
             currentAccount = account;
 
             if (currentAccount >= 0 && isAttachedToWindow()) {
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploaded);
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploadProgressChanged);
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploadFailed);
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.filePreparingFailed);
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.filePreparingStarted);
-                NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileNewChunkAvailable);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploaded);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploadProgressChanged);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploadFailed);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.filePreparingFailed);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.filePreparingStarted);
+                NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileNewChunkAvailable);
             }
         }
     }
@@ -1279,12 +1278,12 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
 
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploaded);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploadProgressChanged);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileUploadFailed);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.filePreparingFailed);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.filePreparingStarted);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.fileNewChunkAvailable);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploaded);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploadProgressChanged);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileUploadFailed);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.filePreparingFailed);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.filePreparingStarted);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.fileNewChunkAvailable);
     }
 
     @Override
@@ -1342,7 +1341,7 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
         }
     }
 
-    public void uploadStickerFile(String path, VideoEditedInfo videoEditedInfo, String emoji, CharSequence stickerPackName, boolean addToFavorite, TLRPC.StickerSet stickerSet, TLRPC.Document replacedSticker, String thumbPath, Utilities.Callback<Boolean> whenDone, Utilities.Callback2<String, TLRPC.InputDocument> customStickerHandler) {
+    public void uploadStickerFile(String path, VideoEditedInfo videoEditedInfo, String emoji, CharSequence stickerPackName, boolean addToFavorite, long dialogId, TLRPC.StickerSet stickerSet, TLRPC.Document replacedSticker, TLRPC.Document uploadedSticker, String thumbPath, Utilities.Callback<Boolean> whenDone, Utilities.Callback2<String, TLRPC.InputDocument> customStickerHandler) {
         AndroidUtilities.runOnUIThread(() -> {
             final boolean newStickerUploader = !(whenDone != null && stickerUploader != null && stickerUploader.uploaded);
             if (newStickerUploader) {
@@ -1355,8 +1354,10 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
             stickerUploader.path = stickerUploader.finalPath = path;
             stickerUploader.stickerPackName = stickerPackName;
             stickerUploader.addToFavorite = addToFavorite;
+            stickerUploader.sendToDialogId = dialogId;
             stickerUploader.stickerSet = stickerSet;
             stickerUploader.replacedSticker = replacedSticker;
+            stickerUploader.uploadedSticker = uploadedSticker;
             stickerUploader.videoEditedInfo = videoEditedInfo;
             stickerUploader.thumbPath = thumbPath;
             stickerUploader.whenDone = whenDone;
@@ -1364,13 +1365,19 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
             stickerUploader.setupFiles();
             if (!newStickerUploader) {
                 afterUploadingMedia();
+            } else if (uploadedSticker != null) {
+                stickerUploader.tlInputStickerSetItem = MediaDataController.getInputStickerSetItem(uploadedSticker, stickerUploader.emoji);
+                stickerUploader.mediaDocument = new TLRPC.TL_messageMediaDocument();
+                stickerUploader.mediaDocument.flags |= 1;
+                stickerUploader.mediaDocument.document = uploadedSticker;
+                afterUploadingMedia();
             } else if (videoEditedInfo != null) {
                 TLRPC.TL_message message = new TLRPC.TL_message();
                 message.id = 1;
                 stickerUploader.finalPath = message.attachPath = StoryEntry.makeCacheFile(UserConfig.selectedAccount, "webm").getAbsolutePath();
                 stickerUploader.messageObject = new MessageObject(UserConfig.selectedAccount, message, (MessageObject) null, false, false);
                 stickerUploader.messageObject.videoEditedInfo = videoEditedInfo;
-                MediaController.getInstance().scheduleVideoConvert(stickerUploader.messageObject, false, false);
+                MediaController.getInstance().scheduleVideoConvert(stickerUploader.messageObject, false, false, false);
             } else {
                 FileLoader.getInstance(currentAccount).uploadFile(path, false, true, ConnectionsManager.FileTypeFile);
             }
@@ -1382,7 +1389,7 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
 
     private void showLoadingDialog() {
         if (loadingToast == null) {
-            loadingToast = new DownloadButton.PreparingVideoToast(getContext());
+            loadingToast = new DownloadButton.PreparingVideoToast(getContext(), getString(R.string.PreparingSticker));
         }
         loadingToast.setOnCancelListener(() -> {
             if (stickerUploader != null) {
@@ -1529,6 +1536,27 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
             if (stickerUploader.whenDone != null) {
                 stickerUploader.whenDone.run(true);
             }
+        } else if (stickerUploader.sendToDialogId != 0) {
+            SendMessagesHelper.getInstance(currentAccount).sendSticker(
+                stickerUploader.mediaDocument.document,
+                null,
+                stickerUploader.sendToDialogId,
+                null, null, null, null, null,
+                true, 0, 0, false,
+                null, null, 0, 0,
+                null
+            );
+            if (loadingToast != null) {
+                loadingToast.setProgress(1f);
+            }
+            AndroidUtilities.runOnUIThread(() -> {
+                NotificationCenter.getInstance(currentAccount).postNotificationName(NotificationCenter.customStickerCreated, false);
+                hideLoadingDialog();
+            }, 450);
+            if (stickerUploader.whenDone != null) {
+                stickerUploader.whenDone.run(true);
+                stickerUploader.whenDone = null;
+            }
         } else if (stickerUploader.stickerSet != null) {
             TLRPC.TL_stickers_addStickerToSet req = new TLRPC.TL_stickers_addStickerToSet();
             req.stickerset = MediaDataController.getInputStickerSet(stickerUploader.stickerSet);
@@ -1570,8 +1598,10 @@ public class StickerMakerView extends FrameLayout implements NotificationCenter.
         public TLRPC.TL_messageMediaDocument mediaDocument;
         public TLRPC.InputFile file;
         public boolean addToFavorite;
+        public long sendToDialogId;
         public TLRPC.StickerSet stickerSet;
         public TLRPC.Document replacedSticker;
+        public TLRPC.Document uploadedSticker;
         public String thumbPath;
         public Utilities.Callback2<String, TLRPC.InputDocument> customHandler;
         public Utilities.Callback<Boolean> whenDone;

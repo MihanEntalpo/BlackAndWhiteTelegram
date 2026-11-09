@@ -33,6 +33,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ContactsController;
@@ -46,11 +47,13 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.AlertDialogDecor;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.ChatActivity;
 import org.telegram.ui.Components.AnimatedColor;
 import org.telegram.ui.Components.AnimatedTextView;
@@ -60,6 +63,7 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EditTextBoldCursor;
 import org.telegram.ui.Components.ItemOptions;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
 import org.telegram.ui.Components.UItem;
 import org.telegram.ui.Components.URLSpanCopyToClipboard;
@@ -70,7 +74,6 @@ import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PrivacyControlActivity;
 
 import java.util.ArrayList;
-import java.util.Objects;
 
 public class BusinessLinksActivity extends UniversalFragment implements NotificationCenter.NotificationCenterDelegate {
 
@@ -78,7 +81,26 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
 
     private static AlertDialog currentDialog;
 
-    public static void openRenameAlert(Context context, int currentAccount, TLRPC.TL_businessChatLink link, Theme.ResourcesProvider resourcesProvider, boolean forceNotAdaptive) {
+    @Override
+    protected boolean useSimpleActionBar() {
+        return true;
+    }
+
+    @Override
+    public View createView(Context context) {
+        setHasOwnBackground(true);
+        super.createView(context);
+        simpleActionBar.setTitle(getString(R.string.BusinessLinks));
+        contentView.setBackground(null);
+
+        listView.setSections();
+        listView.setSectionsDrawBackground(true);
+        listView.adapter.setApplyBackground(false);
+
+        return fragmentView;
+    }
+
+    public static void openRenameAlert(Context context, int currentAccount, TL_account.TL_businessChatLink link, Theme.ResourcesProvider resourcesProvider, boolean forceNotAdaptive) {
         BaseFragment fragment = LaunchActivity.getLastFragment();
         Activity activity = AndroidUtilities.findActivity(context);
         View currentFocus = activity != null ? activity.getCurrentFocus() : null;
@@ -140,13 +162,13 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
         editText.setInputType(InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_NORMAL | InputType.TYPE_TEXT_FLAG_CAP_SENTENCES | InputType.TYPE_TEXT_FLAG_AUTO_CORRECT);
         editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
         editText.setText(link.title);
-        editText.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
-        editText.setHintColor(Theme.getColor(Theme.key_groupcreate_hintText, resourcesProvider));
-        editText.setCursorColor(Theme.getColor(Theme.key_chat_messagePanelCursor));
+        ThemeBind.textColor(editText, Theme.key_dialogTextBlack, resourcesProvider);
+        ThemeBind.editHintColor(editText, Theme.key_groupcreate_hintText, resourcesProvider);
+        ThemeBind.cursorColor(editText, Theme.key_chat_messagePanelCursor);
         editText.setHintText(LocaleController.getString(R.string.BusinessLinksNamePlaceholder));
         editText.setSingleLine(true);
         editText.setFocusable(true);
-        editText.setLineColors(Theme.getColor(Theme.key_windowBackgroundWhiteInputField, resourcesProvider), Theme.getColor(Theme.key_windowBackgroundWhiteInputFieldActivated, resourcesProvider), Theme.getColor(Theme.key_text_RedRegular, resourcesProvider));
+        ThemeBind.lineColors(editText, Theme.key_windowBackgroundWhiteInputField, Theme.key_windowBackgroundWhiteInputFieldActivated, Theme.key_text_RedRegular, resourcesProvider);
         editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
         editText.setBackgroundDrawable(null);
         editText.setPadding(0, 0, dp(42), 0);
@@ -155,7 +177,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
         container.setOrientation(LinearLayout.VERTICAL);
 
         final TextView textView = new TextView(context);
-        textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(textView, Theme.key_dialogTextBlack, resourcesProvider);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         textView.setText(LocaleController.getString(R.string.BusinessLinksRenameMessage));
 
@@ -195,7 +217,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
             BusinessLinksController.getInstance(currentAccount).editLinkTitle(link.link, text);
             dialogInterface.dismiss();
         });
-        builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), (dialogInterface, i) -> {
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), (dialogInterface, i) -> {
             dialogInterface.dismiss();
         });
         if (adaptive) {
@@ -236,9 +258,9 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
         editText.setSelection(editText.getText().length());
     }
 
-    public static boolean closeRenameAlert() {
+    public static boolean closeRenameAlert(boolean invoked) {
         if (currentDialog != null && currentDialog.isShowing()) {
-            currentDialog.dismiss();
+            if (invoked) currentDialog.dismiss();
             return true;
         }
         return false;
@@ -246,10 +268,10 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
 
     @Override
     public boolean onFragmentCreate() {
-        getNotificationCenter().addObserver(this, NotificationCenter.businessLinksUpdated);
-        getNotificationCenter().addObserver(this, NotificationCenter.businessLinkCreated);
-        getNotificationCenter().addObserver(this, NotificationCenter.needDeleteBusinessLink);
-        getNotificationCenter().addObserver(this, NotificationCenter.privacyRulesUpdated);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.businessLinksUpdated);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.businessLinkCreated);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.needDeleteBusinessLink);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.privacyRulesUpdated);
         BusinessLinksController.getInstance(currentAccount).load(true);
         ContactsController.getInstance(currentAccount).loadPrivacySettings();
         return super.onFragmentCreate();
@@ -266,16 +288,28 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
     }
 
     @Override
-    public boolean onBackPressed() {
-        if (closeRenameAlert()) {
+    public boolean onBackPressed(boolean invoked) {
+        if (currentDialog != null && currentDialog.isShowing()) {
+            if (invoked) currentDialog.dismiss();
             return false;
         }
-        return super.onBackPressed();
+        return super.onBackPressed(invoked);
     }
 
     @Override
     protected CharSequence getTitle() {
         return LocaleController.getString(R.string.BusinessLinks);
+    }
+
+    @Override
+    public boolean isSupportEdgeToEdge() {
+        return true;
+    }
+
+    @Nullable
+    @Override
+    protected RecyclerListView getListViewForSimpleGlass() {
+        return listView;
     }
 
     private static int getPrivacyType(ArrayList<TLRPC.PrivacyRule> privacyRules) {
@@ -317,12 +351,12 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
 
     @Override
     protected void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-        items.add(UItem.asTopView(getString(R.string.BusinessLinksInfo), R.raw.biz_links));
+        items.add(UItem.asTopView(getString(R.string.BusinessLinks), getString(R.string.BusinessLinksInfo), R.raw.biz_links));
         adapter.whiteSectionStart();
         if (BusinessLinksController.getInstance(currentAccount).canAddNew()) {
             items.add(UItem.asButton(BUTTON_ADD, R.drawable.menu_link_create, getString(R.string.BusinessLinksAdd)).accent());
         }
-        for (TLRPC.TL_businessChatLink businessLink : BusinessLinksController.getInstance(currentAccount).links) {
+        for (TL_account.TL_businessChatLink businessLink : BusinessLinksController.getInstance(currentAccount).links) {
             UItem item = UItem.asBusinessChatLink(new BusinessLinkWrapper(businessLink));
             items.add(item);
         }
@@ -377,7 +411,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
     @Override
     protected boolean onLongClick(UItem item, View view, int position, float x, float y) {
         if (item.viewType == UniversalAdapter.VIEW_TYPE_BUSINESS_LINK && item.object instanceof BusinessLinkWrapper) {
-            TLRPC.TL_businessChatLink link = ((BusinessLinkWrapper) item.object).link;
+            TL_account.TL_businessChatLink link = ((BusinessLinkWrapper) item.object).link;
 
             ItemOptions options = ItemOptions.makeOptions(this, view);
             options.add(R.drawable.msg_copy, getString(R.string.Copy), () -> {
@@ -406,9 +440,10 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
                 showDialog(dialog);
                 TextView button = (TextView) dialog.getButton(DialogInterface.BUTTON_POSITIVE);
                 if (button != null) {
-                    button.setTextColor(getThemedColor(Theme.key_text_RedBold));
+                    ThemeBind.textColor(button, Theme.key_text_RedBold, getResourceProvider());
                 }
             });
+            options.setScrimViewBackground(listView.getClipBackground(view));
             options.show();
             return true;
         }
@@ -422,22 +457,22 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
                 listView.adapter.update(true);
             }
         } else if (id == NotificationCenter.businessLinkCreated) {
-            TLRPC.TL_businessChatLink link = (TLRPC.TL_businessChatLink) args[0];
+            TL_account.TL_businessChatLink link = (TL_account.TL_businessChatLink) args[0];
             Bundle activityArgs = new Bundle();
             activityArgs.putInt("chatMode", ChatActivity.MODE_EDIT_BUSINESS_LINK);
             activityArgs.putString("business_link", link.link);
             ChatActivity chatActivity = new ChatActivity(activityArgs);
             presentFragment(chatActivity);
         } else if (id == NotificationCenter.needDeleteBusinessLink) {
-            TLRPC.TL_businessChatLink link = (TLRPC.TL_businessChatLink) args[0];
+            TL_account.TL_businessChatLink link = (TL_account.TL_businessChatLink) args[0];
             BusinessLinksController.getInstance(currentAccount).deleteLinkUndoable(this, link.link);
         }
     }
 
     public static class BusinessLinkWrapper {
-        TLRPC.TL_businessChatLink link;
+        TL_account.TL_businessChatLink link;
 
-        public BusinessLinkWrapper(TLRPC.TL_businessChatLink link) {
+        public BusinessLinkWrapper(TL_account.TL_businessChatLink link) {
             this.link = link;
         }
 
@@ -466,7 +501,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
 
         private boolean needDivider;
 
-        private TLRPC.TL_businessChatLink businessLink;
+        private TL_account.TL_businessChatLink businessLink;
 
         public BusinessLinkView(Context context, Theme.ResourcesProvider resourcesProvider) {
             super(context);
@@ -480,7 +515,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
             imageView.setImageResource(R.drawable.msg_limit_links);
             imageView.setPadding(dp(9), dp(9), dp(9), dp(9));
             imageView.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-            imageView.setBackground(Theme.createCircleDrawable(dp(36), Theme.getColor(Theme.key_featuredStickers_addButton)));
+            ThemeBind.fillBackground(imageView, Theme.createCircleDrawable(dp(36), Theme.getColor(Theme.key_featuredStickers_addButton)), ThemeBind.of(Theme.key_featuredStickers_addButton));
             imageView.setOnClickListener(view -> {
                 if (businessLink != null) {
                     AndroidUtilities.addToClipboard(businessLink.link);
@@ -491,13 +526,13 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
 
             titleTextView = new SimpleTextView(context);
             titleTextView.setTextSize(15);
-            titleTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
+            ThemeBind.textColor(titleTextView, Theme.key_windowBackgroundWhiteBlackText);
             titleTextView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
             addView(titleTextView, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, 20, Gravity.TOP | Gravity.FILL_HORIZONTAL, 64, 10, 14, 0));
 
             clicksCountTextView = new SimpleTextView(context);
             clicksCountTextView.setTextSize(14);
-            clicksCountTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2));
+            ThemeBind.textColor(clicksCountTextView, Theme.key_windowBackgroundWhiteGrayText2);
             clicksCountTextView.setGravity(LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT);
             addView(clicksCountTextView, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, 18, Gravity.TOP | Gravity.FILL_HORIZONTAL, 64, 10.66f, 14, 0));
 
@@ -505,7 +540,7 @@ public class BusinessLinksActivity extends UniversalFragment implements Notifica
             messagePreviewTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
             messagePreviewTextView.setMaxLines(1);
             messagePreviewTextView.setEllipsize(TextUtils.TruncateAt.END);
-            messagePreviewTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+            ThemeBind.textColor(messagePreviewTextView, Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
             messagePreviewTextView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
             messagePreviewTextView.allowClickSpoilers = false;
             messagePreviewTextView.setUseAlphaForEmoji(false);

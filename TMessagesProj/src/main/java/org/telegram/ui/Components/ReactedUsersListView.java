@@ -25,6 +25,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.ReactedUserHolderView;
 import org.telegram.ui.Components.Reactions.ReactionsLayoutInBubble;
 
@@ -60,18 +61,22 @@ public class ReactedUsersListView extends FrameLayout {
 
     private OnHeightChangedListener onHeightChangedListener;
     private OnProfileSelectedListener onProfileSelectedListener;
+    private OnProfileSelectedListener onProfileSelectedLongListener;
     private OnCustomEmojiSelectedListener onCustomEmojiSelectedListener;
     ArrayList<ReactionsLayoutInBubble.VisibleReaction> customReactionsEmoji = new ArrayList<>();
     ArrayList<TLRPC.InputStickerSet> customEmojiStickerSets = new ArrayList<>();
     MessageContainsEmojiButton messageContainsEmojiButton;
     Theme.ResourcesProvider resourcesProvider;
 
-    public ReactedUsersListView(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, MessageObject message, TLRPC.ReactionCount reactionCount, boolean addPadding) {
+    private boolean showReactionPreview;
+
+    public ReactedUsersListView(Context context, Theme.ResourcesProvider resourcesProvider, int currentAccount, MessageObject message, TLRPC.ReactionCount reactionCount, boolean addPadding, boolean showReactionPreview) {
         super(context);
         this.currentAccount = currentAccount;
         this.message = message;
         this.filter = reactionCount == null ? null : reactionCount.reaction;
         this.resourcesProvider = resourcesProvider;
+        this.showReactionPreview = showReactionPreview;
         predictiveCount = reactionCount == null ? VISIBLE_ITEMS : reactionCount.count;
         listView = new RecyclerListView(context, resourcesProvider) {
             @Override
@@ -100,7 +105,7 @@ public class ReactedUsersListView extends FrameLayout {
                 View view = null;
                 switch (viewType) {
                     case USER_VIEW_TYPE:
-                        view = new ReactedUserHolderView(ReactedUserHolderView.STYLE_DEFAULT, currentAccount, context, null);
+                        view = new ReactedUserHolderView(ReactedUserHolderView.STYLE_DEFAULT, currentAccount, context, resourcesProvider, true, showReactionPreview);
                         break;
                     default:
                     case CUSTOM_EMOJI_VIEW_TYPE:
@@ -114,7 +119,7 @@ public class ReactedUsersListView extends FrameLayout {
 
                         FrameLayout frameLayout = new FrameLayout(context);
                         View gap = new View(context);
-                        gap.setBackgroundColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuSeparator, resourcesProvider));
+                        ThemeBind.backgroundColor(gap, ThemeBind.multAlpha(Theme.key_actionBarDefaultSubmenuItem, 0.06f), resourcesProvider);
                         frameLayout.addView(gap, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 8));
                         frameLayout.addView(messageContainsEmojiButton, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, 0, 0, 8, 0, 0));
 
@@ -157,6 +162,15 @@ public class ReactedUsersListView extends FrameLayout {
                 }
             }
         });
+        listView.setOnItemLongClickListener((view, position) -> {
+            int itemViewType = adapter.getItemViewType(position);
+            if (itemViewType == USER_VIEW_TYPE) {
+                if (onProfileSelectedLongListener != null) {
+                    onProfileSelectedLongListener.onProfileSelected(this, MessageObject.getPeerId(userReactions.get(position).peer_id), userReactions.get(position));
+                }
+            }
+            return true;
+        });
         listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
             @Override
             public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
@@ -182,7 +196,7 @@ public class ReactedUsersListView extends FrameLayout {
         addView(loadingView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         if (!addPadding && filter != null && filter instanceof TLRPC.TL_reactionCustomEmoji && !MessagesController.getInstance(currentAccount).premiumFeaturesBlocked()) {
             customReactionsEmoji.clear();
-            customReactionsEmoji.add(ReactionsLayoutInBubble.VisibleReaction.fromTLReaction(filter));
+            customReactionsEmoji.add(ReactionsLayoutInBubble.VisibleReaction.fromTL(filter));
             updateCustomReactionsButton();
         }
         loadingView.setViewType(customReactionsEmoji.isEmpty() ? FlickerLoadingView.REACTED_TYPE : FlickerLoadingView.REACTED_TYPE_WITH_EMOJI_HINT);
@@ -284,7 +298,7 @@ public class ReactedUsersListView extends FrameLayout {
                         }
 
 
-                        ReactionsLayoutInBubble.VisibleReaction visibleReaction = ReactionsLayoutInBubble.VisibleReaction.fromTLReaction(res.reactions.get(i).reaction);
+                        ReactionsLayoutInBubble.VisibleReaction visibleReaction = ReactionsLayoutInBubble.VisibleReaction.fromTL(res.reactions.get(i).reaction);
                         if (visibleReaction.documentId != 0) {
                             visibleCustomEmojiReactions.add(visibleReaction);
                         }
@@ -378,6 +392,11 @@ public class ReactedUsersListView extends FrameLayout {
 
     public ReactedUsersListView setOnProfileSelectedListener(OnProfileSelectedListener onProfileSelectedListener) {
         this.onProfileSelectedListener = onProfileSelectedListener;
+        return this;
+    }
+
+    public ReactedUsersListView setOnProfileLongSelectedListener(OnProfileSelectedListener onProfileSelectedListener) {
+        this.onProfileSelectedLongListener = onProfileSelectedListener;
         return this;
     }
 

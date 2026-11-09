@@ -11,6 +11,7 @@ import android.util.Log;
 import androidx.annotation.Nullable;
 import androidx.core.app.NotificationCompat;
 import androidx.core.app.NotificationManagerCompat;
+import androidx.core.app.ServiceCompat;
 
 import org.telegram.messenger.web.R;
 import org.telegram.tgnet.TL_smsjobs;
@@ -147,5 +148,15 @@ public class SMSJobsNotification extends Service {
         } catch (Throwable e) {
             FileLog.e(e);
         }
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        // dataSync time limit is exhausted (6 hours a day in background since Android 15), the service must stop now
+        FileLog.d("SMSJobsNotification timeout, type = " + fgsType);
+        try {
+            stopForeground(true);
+        } catch (Throwable ignore) {}
+        stopSelf();
     }
 }

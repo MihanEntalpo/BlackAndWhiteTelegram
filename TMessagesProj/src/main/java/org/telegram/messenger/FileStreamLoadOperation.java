@@ -8,15 +8,21 @@
 
 package org.telegram.messenger;
 
+
+import static androidx.media3.common.util.Assertions.checkNotNull;
+import static androidx.media3.common.util.Util.castNonNull;
+
 import android.net.Uri;
 
 import androidx.annotation.Nullable;
 
-import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.upstream.BaseDataSource;
-import com.google.android.exoplayer2.upstream.DataSpec;
-import com.google.android.exoplayer2.upstream.TransferListener;
-import com.google.android.exoplayer2.util.Log;
+import androidx.annotation.OptIn;
+import androidx.media3.common.C;
+import androidx.media3.common.util.UnstableApi;
+import androidx.media3.common.util.Util;
+import androidx.media3.datasource.DataSource;
+import androidx.media3.datasource.DataSpec;
+import androidx.media3.datasource.TransferListener;
 
 import org.telegram.tgnet.TLRPC;
 
@@ -26,11 +32,13 @@ import java.io.IOException;
 import java.io.RandomAccessFile;
 import java.io.UnsupportedEncodingException;
 import java.net.URLEncoder;
+import java.util.ArrayList;
 import java.util.Objects;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CountDownLatch;
 
-public class FileStreamLoadOperation extends BaseDataSource implements FileLoadOperationStream {
+@OptIn(markerClass = UnstableApi.class)
+public class FileStreamLoadOperation implements DataSource, FileLoadOperationStream {
 
     public static final ConcurrentHashMap<Long, FileStreamLoadOperation> allStreams = new ConcurrentHashMap<>();
 
@@ -38,6 +46,8 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
 
     private Uri uri;
     private long bytesRemaining;
+    private long bytesTransferred;
+    private long requestedLength;
     private boolean opened;
     private long currentOffset;
     private CountDownLatch countDownLatch;
@@ -50,7 +60,8 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
     private static final ConcurrentHashMap<Long, Integer> priorityMap = new ConcurrentHashMap<>();
 
     public FileStreamLoadOperation() {
-        super(/* isNetwork= */ false);
+        this.isNetwork = true;
+        this.listeners = new ArrayList<>(/* initialCapacity= */ 1);
     }
 
     @Deprecated
@@ -94,10 +105,13 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
             document.attributes.add(new TLRPC.TL_documentAttributeAudio());
         }
         allStreams.put(document.id, this);
-        loadOperation = FileLoader.getInstance(currentAccount).loadStreamFile(this, document, null, parentObject, currentOffset = dataSpec.position, false, getCurrentPriority());
-        bytesRemaining = dataSpec.length == C.LENGTH_UNSET ? document.size - dataSpec.position : dataSpec.length;
-        if (bytesRemaining < 0) {
-            throw new EOFException();
+        currentOffset = dataSpec.position;
+        requestedLength = dataSpec.length;
+        loadOperation = FileLoader.getInstance(currentAccount).loadStreamFile(this, document, null, parentObject, currentOffset, false, getCurrentPriority());
+        bytesTransferred = 0;
+        bytesRemaining = document.size - dataSpec.position;
+        if (requestedLength != C.LENGTH_UNSET) {
+            bytesRemaining = Math.min(bytesRemaining, requestedLength - bytesTransferred);
         }
         opened = true;
         transferStarted(dataSpec);
@@ -108,13 +122,18 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
                     file = new RandomAccessFile(currentFile, "r");
                     file.seek(currentOffset);
                     if (loadOperation.isFinished()) {
+                        isNetwork = false;
                         bytesRemaining = currentFile.length() - currentOffset;
+                        if (requestedLength != C.LENGTH_UNSET) {
+                            bytesRemaining = Math.min(bytesRemaining, requestedLength - bytesTransferred);
+                        }
                     }
                 } catch (Throwable e) {
                 }
             }
         }
-//        FileLog.e("FileStreamLoadOperation " + document.id + " open operation=" + loadOperation + " currentFile=" + currentFile + " file=" + file + " bytesRemaining=" + bytesRemaining + " me=" + this);
+        FileLog.e("FileStreamLoadOperation " + document.id + " open operation=" + loadOperation + " currentFile=" + currentFile + " file=" + file + " bytesRemaining=" + bytesRemaining + " me=" + this);
+        FileLog.e("FileStreamLoadOperation " + document.id + " " + MessageObject.getVideoWidth(document) + "x" + MessageObject.getVideoWidth(document) + " mime_type="+document.mime_type+" codec="+MessageObject.getVideoCodec(document)+" size="+ document.size);
         return bytesRemaining;
     }
 
@@ -177,10 +196,22 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
                                 file = new RandomAccessFile(currentFile, "r");
                                 file.seek(currentOffset);
                                 if (loadOperation.isFinished()) {
+                                    isNetwork = false;
                                     bytesRemaining = currentFile.length() - currentOffset;
+                                    if (requestedLength != C.LENGTH_UNSET) {
+                                        bytesRemaining = Math.min(bytesRemaining, requestedLength - bytesTransferred);
+                                    }
                                 }
                             } catch (Throwable e) {
-
+                                if (loadOperation.isFinished() && !currentFile.exists()) {
+                                    FileLoader.getInstance(currentAccount).cancelLoadFile(loadOperation.getFileName());
+                                    FileLoadOperation newLoadOperation = FileLoader.getInstance(currentAccount).loadStreamFile(this, document, null, parentObject, currentOffset, false, getCurrentPriority());
+                                    if (this.loadOperation != newLoadOperation) {
+//                            FileLog.e("FileStreamLoadOperation " + document.id + " read: changed operation!");
+                                        this.loadOperation.removeStreamListener(this);
+                                        this.loadOperation = newLoadOperation;
+                                    }
+                                }
                             }
                         }
                     } else {
@@ -195,8 +226,12 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
                 if (bytesRead > 0) {
                     currentOffset += bytesRead;
                     bytesRemaining -= bytesRead;
+                    bytesTransferred += bytesRead;
                     bytesTransferred(bytesRead);
                 }
+            } catch (InterruptedException e) {
+                FileLog.e(e);
+                return C.RESULT_NOTHING_READ;
             } catch (Exception e) {
                 throw new IOException(e);
             }
@@ -211,7 +246,7 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
 
     @Override
     public void close() {
-//        FileLog.e("FileStreamLoadOperation " + document.id + " close me=" + this);
+        FileLog.e("FileStreamLoadOperation " + document.id + " close me=" + this);
         if (loadOperation != null) {
             loadOperation.removeStreamListener(this);
         }
@@ -239,9 +274,10 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
     @Override
     public void newDataAvailable() {
 //        FileLog.e("FileStreamLoadOperation " + document.id + " newDataAvailable me=" + this);
-        if (countDownLatch != null) {
-            countDownLatch.countDown();
-            countDownLatch = null;
+        CountDownLatch latch = countDownLatch;
+        countDownLatch = null;
+        if (latch != null) {
+            latch.countDown();
         }
     }
 
@@ -260,19 +296,85 @@ public class FileStreamLoadOperation extends BaseDataSource implements FileLoadO
             return Uri.fromFile(file);
         }
         try {
-            String params = "?account=" + currentAccount +
-                    "&id=" + document.id +
-                    "&hash=" + document.access_hash +
-                    "&dc=" + document.dc_id +
-                    "&size=" + document.size +
-                    "&mime=" + URLEncoder.encode(document.mime_type, "UTF-8") +
-                    "&rid=" + FileLoader.getInstance(currentAccount).getFileReference(parent) +
-                    "&name=" + URLEncoder.encode(FileLoader.getDocumentFileName(document), "UTF-8") +
-                    "&reference=" + Utilities.bytesToHex(document.file_reference != null ? document.file_reference : new byte[0]);
+            String params =
+                "?account=" + currentAccount +
+                "&id=" + document.id +
+                "&hash=" + document.access_hash +
+                "&dc=" + document.dc_id +
+                "&size=" + document.size +
+                "&mime=" + URLEncoder.encode(document.mime_type, "UTF-8") +
+                "&rid=" + FileLoader.getInstance(currentAccount).getFileReference(parent) +
+                "&name=" + URLEncoder.encode(FileLoader.getDocumentFileName(document), "UTF-8") +
+                "&reference=" + Utilities.bytesToHex(document.file_reference != null ? document.file_reference : new byte[0]);
             return Uri.parse("tg://" + attachFileName + params);
         } catch (UnsupportedEncodingException e) {
             FileLog.e(e);
         }
         return null;
+    }
+
+
+
+
+    protected boolean isNetwork;
+    private final ArrayList<TransferListener> listeners;
+
+    private int listenerCount;
+    @Nullable private DataSpec dataSpec;
+
+    @Override
+    public final void addTransferListener(TransferListener transferListener) {
+        checkNotNull(transferListener);
+        if (!listeners.contains(transferListener)) {
+            listeners.add(transferListener);
+            listenerCount++;
+        }
+    }
+
+    /**
+     * Notifies listeners that data transfer for the specified {@link DataSpec} is being initialized.
+     *
+     * @param dataSpec {@link DataSpec} describing the data for initializing transfer.
+     */
+    protected final void transferInitializing(DataSpec dataSpec) {
+        for (int i = 0; i < listenerCount; i++) {
+            listeners.get(i).onTransferInitializing(/* source= */ this, dataSpec, isNetwork);
+        }
+    }
+
+    /**
+     * Notifies listeners that data transfer for the specified {@link DataSpec} started.
+     *
+     * @param dataSpec {@link DataSpec} describing the data being transferred.
+     */
+    protected final void transferStarted(DataSpec dataSpec) {
+        this.dataSpec = dataSpec;
+        for (int i = 0; i < listenerCount; i++) {
+            listeners.get(i).onTransferStart(/* source= */ this, dataSpec, isNetwork);
+        }
+    }
+
+    /**
+     * Notifies listeners that bytes were transferred.
+     *
+     * @param bytesTransferred The number of bytes transferred since the previous call to this method
+     *     (or if the first call, since the transfer was started).
+     */
+    protected final void bytesTransferred(int bytesTransferred) {
+        DataSpec dataSpec = castNonNull(this.dataSpec);
+        for (int i = 0; i < listenerCount; i++) {
+            listeners
+                    .get(i)
+                    .onBytesTransferred(/* source= */ this, dataSpec, isNetwork, bytesTransferred);
+        }
+    }
+
+    /** Notifies listeners that a transfer ended. */
+    protected final void transferEnded() {
+        DataSpec dataSpec = castNonNull(this.dataSpec);
+        for (int i = 0; i < listenerCount; i++) {
+            listeners.get(i).onTransferEnd(/* source= */ this, dataSpec, isNetwork);
+        }
+        this.dataSpec = null;
     }
 }

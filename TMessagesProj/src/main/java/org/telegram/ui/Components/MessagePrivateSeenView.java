@@ -1,7 +1,6 @@
 package org.telegram.ui.Components;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
-import static org.telegram.ui.ActionBar.Theme.key_dialogGrayLine;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -25,6 +24,8 @@ import androidx.annotation.NonNull;
 import androidx.core.content.ContextCompat;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
+import org.telegram.messenger.AppGlobalConfig;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
@@ -33,21 +34,27 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.Premium.PremiumButtonView;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PremiumPreviewFragment;
 import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
-import org.telegram.ui.Stories.recorder.HintView2;
 
 import java.util.Date;
 
 public class MessagePrivateSeenView extends FrameLayout {
 
+    public static final int TYPE_SEEN = 0;
+    public static final int TYPE_EDIT = 1;
+    public static final int TYPE_FORWARD = 2;
+
     private final int currentAccount;
+    private final int type;
     private final Theme.ResourcesProvider resourcesProvider;
 
     private final LinearLayout valueLayout;
@@ -57,12 +64,16 @@ public class MessagePrivateSeenView extends FrameLayout {
 
     private final long dialogId;
     private final int messageId;
+    private final int sent_date;
+    private final int edit_date;
+    private final int fwd_date;
     private final Runnable dismiss;
 
     private final int messageDiff;
 
-    public MessagePrivateSeenView(Context context, @NonNull MessageObject messageObject, Runnable dismiss, Theme.ResourcesProvider resourcesProvider) {
+    public MessagePrivateSeenView(Context context, int type, @NonNull MessageObject messageObject, Runnable dismiss, Theme.ResourcesProvider resourcesProvider) {
         super(context);
+        this.type = type;
 
         currentAccount = messageObject.currentAccount;
         this.resourcesProvider = resourcesProvider;
@@ -71,17 +82,32 @@ public class MessagePrivateSeenView extends FrameLayout {
 
         dialogId = messageObject.getDialogId();
         messageId = messageObject.getId();
+        sent_date = messageObject.messageOwner == null ? 0 : messageObject.messageOwner.date;
+        edit_date = messageObject.messageOwner == null ? 0 : messageObject.messageOwner.edit_date;
+        fwd_date = messageObject.messageOwner == null || messageObject.messageOwner.fwd_from == null ? 0 : messageObject.messageOwner.fwd_from.date;
 
         ImageView iconView = new ImageView(context);
         addView(iconView, LayoutHelper.createFrame(24, 24, Gravity.LEFT | Gravity.CENTER_VERTICAL, 11, 0, 0, 0));
-        Drawable drawable = ContextCompat.getDrawable(context, messageObject.isVoice() ? R.drawable.msg_played : R.drawable.msg_seen).mutate();
-        drawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultSubmenuItemIcon, resourcesProvider), PorterDuff.Mode.MULTIPLY));
+        int icon;
+        if (type == TYPE_EDIT) {
+            icon = AppGlobalConfig.getInstance(currentAccount).messagePrimaryEditedDate.get() ?
+                R.drawable.outline_message_time_24:
+                R.drawable.menu_edited_stamp;
+        } else if (type == TYPE_FORWARD) {
+            icon = R.drawable.menu_forward_stamp;
+        } else if (messageObject.isVoice()) {
+            icon = R.drawable.msg_played;
+        } else {
+            icon = R.drawable.msg_seen;
+        }
+        Drawable drawable = ContextCompat.getDrawable(context, icon).mutate();
+        ThemeBind.drawableColorFilter(this, drawable, Theme.key_actionBarDefaultSubmenuItemIcon, resourcesProvider, PorterDuff.Mode.MULTIPLY);
         iconView.setImageDrawable(drawable);
 
         loadingView = new TextView(context);
         SpannableStringBuilder text = new SpannableStringBuilder("loading text ");
         text.setSpan(new LoadingSpan(loadingView, dp(96), dp(2), resourcesProvider), 0, text.length() - 1, Spanned.SPAN_INCLUSIVE_EXCLUSIVE);
-        loadingView.setTextColor(Theme.multAlpha(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider), .7f));
+        ThemeBind.textColor(loadingView, ThemeBind.multAlpha(Theme.key_dialogTextBlack, .7f), resourcesProvider);
         loadingView.setText(text);
         loadingView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         addView(loadingView, LayoutHelper.createFrame(96, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 40, -1, 8, 0));
@@ -92,13 +118,13 @@ public class MessagePrivateSeenView extends FrameLayout {
         addView(valueLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 38, 0, 8, 0));
 
         valueTextView = new TextView(context);
-        valueTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(valueTextView, Theme.key_dialogTextBlack, resourcesProvider);
         valueTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         valueLayout.addView(valueTextView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 0, -1, 0, 0));
 
         premiumTextView = new TextView(context);
-        premiumTextView.setBackground(Theme.createRoundRectDrawable(dp(20), Theme.multAlpha(Theme.getColor(Theme.key_divider, resourcesProvider), .75f)));
-        premiumTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.fillBackground(premiumTextView, Theme.createRoundRectDrawable(dp(20), Theme.multAlpha(Theme.getColor(Theme.key_divider, resourcesProvider), .75f)), ThemeBind.multAlpha(Theme.key_divider, .75f), resourcesProvider);
+        ThemeBind.textColor(premiumTextView, Theme.key_dialogTextBlack, resourcesProvider);
         premiumTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 11);
         premiumTextView.setPadding(dp(5.33f), dp(2), dp(5.33f), dp(2.33f));
         valueLayout.addView(premiumTextView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 4, 0, 0, 0));
@@ -107,6 +133,21 @@ public class MessagePrivateSeenView extends FrameLayout {
     }
 
     private void request() {
+        if (type == TYPE_EDIT) {
+            valueLayout.setAlpha(1f);
+            loadingView.setAlpha(0f);
+            premiumTextView.setVisibility(View.GONE);
+            valueTextView.setText(AppGlobalConfig.getInstance(currentAccount).messagePrimaryEditedDate.get() ?
+                LocaleController.formatPmSentDate(sent_date):
+                LocaleController.formatPmEditedDate(edit_date));
+            return;
+        } else if (type == TYPE_FORWARD) {
+            valueLayout.setAlpha(1f);
+            loadingView.setAlpha(0f);
+            premiumTextView.setVisibility(View.GONE);
+            valueTextView.setText(LocaleController.formatPmFwdDate(fwd_date));
+            return;
+        }
         setOnClickListener(null);
         valueLayout.setAlpha(0f);
         loadingView.setAlpha(1f);
@@ -138,7 +179,7 @@ public class MessagePrivateSeenView extends FrameLayout {
             loadingView.animate().alpha(0f).setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT).setDuration(320).start();
 
             if (isPremiumLocked) {
-                setBackground(Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 6, 0));
+                ThemeBind.selectorBackground(this, Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 6, 0), null, ThemeBind.of(Theme.key_listSelector), resourcesProvider);
                 setOnClickListener(v -> showSheet(getContext(), currentAccount, dialogId, false, dismiss, this::request, resourcesProvider));
             } else {
                 setBackground(null);
@@ -150,7 +191,20 @@ public class MessagePrivateSeenView extends FrameLayout {
     public boolean isPremiumLocked = false;
 
     public static void showSheet(Context context, int currentAccount, long dialogId, boolean lastSeen, Runnable dismiss, Runnable updated, Theme.ResourcesProvider resourcesProvider) {
-        BottomSheet sheet = new BottomSheet(context, false, resourcesProvider);
+        BottomSheet sheet = new BottomSheet(context, false, resourcesProvider) {
+            @Override
+            public void onThemeColorsChanged() {
+                super.onThemeColorsChanged();
+                try {
+                    final int color = getThemedColor(Theme.key_dialogBackground);
+                    if (navBarColor != color) {
+                        fixNavigationBar(color);
+                    }
+                } catch (Exception e) {
+                    FileLog.e(e);
+                }
+            }
+        };
         sheet.fixNavigationBar(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
 
         final boolean premiumLocked = MessagesController.getInstance(currentAccount).premiumFeaturesBlocked();
@@ -164,20 +218,20 @@ public class MessagePrivateSeenView extends FrameLayout {
         imageView.setAnimation(lastSeen ? R.raw.large_lastseen : R.raw.large_readtime, 70, 70);
         imageView.playAnimation();
         imageView.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
-        imageView.setBackground(Theme.createCircleDrawable(dp(80), Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider)));
+        ThemeBind.fillBackground(imageView, Theme.createCircleDrawable(dp(80), Theme.getColor(Theme.key_featuredStickers_addButton, resourcesProvider)), ThemeBind.of(Theme.key_featuredStickers_addButton), resourcesProvider);
         layout.addView(imageView, LayoutHelper.createLinear(80, 80, Gravity.CENTER_HORIZONTAL, 0, 16, 0, 16));
 
         TextView headerView = new TextView(context);
-        headerView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        headerView.setTypeface(AndroidUtilities.bold());
         headerView.setGravity(Gravity.CENTER);
-        headerView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(headerView, Theme.key_dialogTextBlack, resourcesProvider);
         headerView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
         headerView.setText(LocaleController.getString(lastSeen ? R.string.PremiumLastSeenHeader1 : R.string.PremiumReadHeader1));
         layout.addView(headerView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 12, 0, 12, 0));
 
         TextView descriptionView = new TextView(context);
         descriptionView.setGravity(Gravity.CENTER);
-        descriptionView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(descriptionView, Theme.key_dialogTextBlack, resourcesProvider);
         descriptionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         String username = "";
         if (dialogId > 0) {
@@ -187,13 +241,13 @@ public class MessagePrivateSeenView extends FrameLayout {
         descriptionView.setText(AndroidUtilities.replaceTags(LocaleController.formatString(lastSeen ? (premiumLocked ? R.string.PremiumLastSeenText1Locked : R.string.PremiumLastSeenText1) : (premiumLocked ? R.string.PremiumReadText1Locked : R.string.PremiumReadText1), username)));
         layout.addView(descriptionView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 32, 9, 32, 19));
 
-        ButtonWithCounterView button1 = new ButtonWithCounterView(context, resourcesProvider);
+        ButtonWithCounterView button1 = new ButtonWithCounterView(context, resourcesProvider).setRound();
         button1.setText(LocaleController.getString(lastSeen ? R.string.PremiumLastSeenButton1 : R.string.PremiumReadButton1), false);
         layout.addView(button1, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, Gravity.CENTER_HORIZONTAL));
         button1.setOnClickListener(v -> {
             button1.setLoading(true);
             if (lastSeen) {
-                TLRPC.TL_account_setPrivacy req = new TLRPC.TL_account_setPrivacy();
+                TL_account.setPrivacy req = new TL_account.setPrivacy();
                 req.key = new TLRPC.TL_inputPrivacyKeyStatusTimestamp();
                 req.rules.add(new TLRPC.TL_inputPrivacyValueAllowAll());
                 ConnectionsManager.getInstance(currentAccount).sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
@@ -211,7 +265,7 @@ public class MessagePrivateSeenView extends FrameLayout {
                     }
                 }));
             } else {
-                TLRPC.TL_account_setGlobalPrivacySettings req = new TLRPC.TL_account_setGlobalPrivacySettings();
+                TL_account.setGlobalPrivacySettings req = new TL_account.setGlobalPrivacySettings();
                 req.settings = ContactsController.getInstance(currentAccount).getGlobalPrivacySettings();
                 if (req.settings == null) {
                     req.settings = new TLRPC.TL_globalPrivacySettings();
@@ -252,22 +306,22 @@ public class MessagePrivateSeenView extends FrameLayout {
             };
             or.setGravity(Gravity.CENTER);
             or.setAlignment(Layout.Alignment.ALIGN_CENTER);
-            or.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+            ThemeBind.textColor(or, Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
             or.setText(" " + LocaleController.getString(R.string.PremiumOr) + " ");
             or.setTextSize(14);
             layout.addView(or, LayoutHelper.createLinear(270, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 12, 17, 12, 17));
 
             TextView headerView2 = new TextView(context);
-            headerView2.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+            headerView2.setTypeface(AndroidUtilities.bold());
             headerView2.setGravity(Gravity.CENTER);
-            headerView2.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+            ThemeBind.textColor(headerView2, Theme.key_dialogTextBlack, resourcesProvider);
             headerView2.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
             headerView2.setText(LocaleController.getString(lastSeen ? R.string.PremiumLastSeenHeader2 : R.string.PremiumReadHeader2));
             layout.addView(headerView2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 12, 0, 12, 0));
 
             TextView descriptionView2 = new TextView(context);
             descriptionView2.setGravity(Gravity.CENTER);
-            descriptionView2.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+            ThemeBind.textColor(descriptionView2, Theme.key_dialogTextBlack, resourcesProvider);
             descriptionView2.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             descriptionView2.setText(AndroidUtilities.replaceTags(LocaleController.formatString(lastSeen ? R.string.PremiumLastSeenText2 : R.string.PremiumReadText2, username)));
             layout.addView(descriptionView2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 32, 9, 32, 19));
@@ -294,7 +348,12 @@ public class MessagePrivateSeenView extends FrameLayout {
     @Override
     protected void onDetachedFromWindow() {
         super.onDetachedFromWindow();
-        Bulletin.hideVisible();
+        if (Bulletin.getVisibleBulletin() != null) {
+            Bulletin bulletin = Bulletin.getVisibleBulletin();
+            if (bulletin.getLayout() != null && bulletin.getLayout().getParent() != null && bulletin.getLayout().getParent().getParent() instanceof Bulletin.BulletinWindow.BulletinWindowLayout) {
+                bulletin.hide();
+            }
+        }
     }
 
     float minWidth = -1;
@@ -307,17 +366,21 @@ public class MessagePrivateSeenView extends FrameLayout {
 
         if (minWidth < 0) {
             minWidth = 0;
-            final long date = System.currentTimeMillis();
-            minWidth = Math.max(minWidth, dp(40 + 96 + 8));
-            minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.getString(R.string.PmReadUnknown)));
-            minWidth = Math.max(minWidth, dp(40 + 16 + 8) + valueTextView.getPaint().measureText(LocaleController.getString(R.string.PmRead) + premiumTextView.getPaint().measureText(LocaleController.getString(R.string.PmReadShowWhen))));
-            minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadTodayAt, LocaleController.getInstance().formatterDay.format(new Date(date)))));
-            if (messageDiff > 60 * 60 * 24) {
-                minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadYesterdayAt, LocaleController.getInstance().formatterDay.format(new Date(date)))));
-            }
-            if (messageDiff > 60 * 60 * 24 * 2) {
-                minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadDateTimeAt, LocaleController.getInstance().formatterDayMonth.format(new Date(date)), LocaleController.getInstance().formatterDay.format(new Date(date)))));
-                minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadDateTimeAt, LocaleController.getInstance().formatterYear.format(new Date(date)), LocaleController.getInstance().formatterDay.format(new Date(date)))));
+            if (type == TYPE_SEEN) {
+                final long date = System.currentTimeMillis();
+                minWidth = Math.max(minWidth, dp(40 + 96 + 8));
+                minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.getString(R.string.PmReadUnknown)));
+                minWidth = Math.max(minWidth, dp(40 + 16 + 8) + valueTextView.getPaint().measureText(LocaleController.getString(R.string.PmRead) + premiumTextView.getPaint().measureText(LocaleController.getString(R.string.PmReadShowWhen))));
+                minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadTodayAt, LocaleController.getInstance().getFormatterDay().format(new Date(date)))));
+                if (messageDiff > 60 * 60 * 24) {
+                    minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadYesterdayAt, LocaleController.getInstance().getFormatterDay().format(new Date(date)))));
+                }
+                if (messageDiff > 60 * 60 * 24 * 2) {
+                    minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadDateTimeAt, LocaleController.getInstance().getFormatterDayMonth().format(new Date(date)), LocaleController.getInstance().getFormatterDay().format(new Date(date)))));
+                    minWidth = Math.max(minWidth, dp(40 + 8) + valueTextView.getPaint().measureText(LocaleController.formatString(R.string.PmReadDateTimeAt, LocaleController.getInstance().getFormatterYear().format(new Date(date)), LocaleController.getInstance().getFormatterDay().format(new Date(date)))));
+                }
+            } else {
+                minWidth = dp(40 + 8) + valueTextView.getPaint().measureText(valueTextView.getText().toString());
             }
         }
 

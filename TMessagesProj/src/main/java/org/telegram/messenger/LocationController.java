@@ -8,6 +8,7 @@
 
 package org.telegram.messenger;
 
+import android.Manifest;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.content.Intent;
@@ -20,7 +21,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.os.SystemClock;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.SparseIntArray;
 
 import androidx.collection.LongSparseArray;
@@ -30,6 +30,9 @@ import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_stories;
+import org.telegram.tgnet.tl.TL_update;
+import org.telegram.ui.Components.PermissionRequest;
 
 import java.util.ArrayList;
 import java.util.HashMap;
@@ -57,9 +60,6 @@ public class LocationController extends BaseController implements NotificationCe
     private SparseIntArray requests = new SparseIntArray();
     private LongSparseArray<Boolean> cacheRequests = new LongSparseArray<>();
     private long locationEndWatchTime;
-    private boolean shareMyCurrentLocation;
-
-    private boolean lookingForPeopleNearby;
 
     public ArrayList<SharingLocationInfo> sharingLocationsUI = new ArrayList<>();
     private LongSparseArray<SharingLocationInfo> sharingLocationsMapUI = new LongSparseArray<>();
@@ -74,9 +74,6 @@ public class LocationController extends BaseController implements NotificationCe
     private final static int FOREGROUND_UPDATE_TIME = 20 * 1000;
     private final static int WATCH_LOCATION_TIMEOUT = 65 * 1000;
     private final static int SEND_NEW_LOCATION_TIME = 2 * 1000;
-
-    private ArrayList<TLRPC.TL_peerLocated> cachedNearbyUsers = new ArrayList<>();
-    private ArrayList<TLRPC.TL_peerLocated> cachedNearbyChats = new ArrayList<>();
 
     private ILocationServiceProvider.ILocationRequest locationRequest;
 
@@ -284,7 +281,7 @@ public class LocationController extends BaseController implements NotificationCe
                             break;
                         case ILocationServiceProvider.STATUS_RESOLUTION_REQUIRED:
                             Utilities.stageQueue.postRunnable(() -> {
-                                if (lookingForPeopleNearby || !sharingLocations.isEmpty()) {
+                                if (!sharingLocations.isEmpty()) {
                                     AndroidUtilities.runOnUIThread(() -> getNotificationCenter().postNotificationName(NotificationCenter.needShowPlayServicesAlert, status));
                                 }
                             });
@@ -313,7 +310,7 @@ public class LocationController extends BaseController implements NotificationCe
             if (!permissionsGranted) {
                 servicesAvailable = false;
             }
-            if (shareMyCurrentLocation || lookingForPeopleNearby || !sharingLocations.isEmpty()) {
+            if (!sharingLocations.isEmpty()) {
                 if (permissionsGranted) {
                     try {
                         ApplicationLoader.getLocationServiceProvider().getLastLocation(this::setLastKnownLocation);
@@ -424,12 +421,12 @@ public class LocationController extends BaseController implements NotificationCe
                     boolean updated = false;
                     for (int a1 = 0; a1 < updates.updates.size(); a1++) {
                         TLRPC.Update update = updates.updates.get(a1);
-                        if (update instanceof TLRPC.TL_updateEditMessage) {
+                        if (update instanceof TL_update.TL_updateEditMessage) {
                             updated = true;
-                            info.messageObject.messageOwner = ((TLRPC.TL_updateEditMessage) update).message;
-                        } else if (update instanceof TLRPC.TL_updateEditChannelMessage) {
+                            info.messageObject.messageOwner = ((TL_update.TL_updateEditMessage) update).message;
+                        } else if (update instanceof TL_update.TL_updateEditChannelMessage) {
                             updated = true;
-                            info.messageObject.messageOwner = ((TLRPC.TL_updateEditChannelMessage) update).message;
+                            info.messageObject.messageOwner = ((TL_update.TL_updateEditChannelMessage) update).message;
                         }
                     }
                     if (updated) {
@@ -440,23 +437,8 @@ public class LocationController extends BaseController implements NotificationCe
                 requests.put(reqId[0], 0);
             }
         }
-        if (shareMyCurrentLocation) {
-            UserConfig userConfig = getUserConfig();
-            userConfig.lastMyLocationShareTime = (int) (System.currentTimeMillis() / 1000);
-            userConfig.saveConfig(false);
-
-            TLRPC.TL_contacts_getLocated req = new TLRPC.TL_contacts_getLocated();
-            req.geo_point = new TLRPC.TL_inputGeoPoint();
-            req.geo_point.lat = lastKnownLocation.getLatitude();
-            req.geo_point._long = lastKnownLocation.getLongitude();
-            req.background = true;
-            getConnectionsManager().sendRequest(req, (response, error) -> {
-
-            });
-        }
         getConnectionsManager().resumeNetworkMaybe();
-        if (shouldStopGps() || shareMyCurrentLocation) {
-            shareMyCurrentLocation = false;
+        if (shouldStopGps()) {
             stop(false);
         }
     }
@@ -475,11 +457,8 @@ public class LocationController extends BaseController implements NotificationCe
 
     protected void update() {
         UserConfig userConfig = getUserConfig();
-        if (ApplicationLoader.isScreenOn && !ApplicationLoader.mainInterfacePaused && !shareMyCurrentLocation &&
-                userConfig.isClientActivated() && userConfig.isConfigLoaded() && userConfig.sharingMyLocationUntil != 0 && Math.abs(System.currentTimeMillis() / 1000 - userConfig.lastMyLocationShareTime) >= 60 * 60) {
-            shareMyCurrentLocation = true;
-        }
         if (!sharingLocations.isEmpty()) {
+            boolean expired = false;
             for (int a = 0; a < sharingLocations.size(); a++) {
                 final SharingLocationInfo info = sharingLocations.get(a);
                 int currentTime = getConnectionsManager().getCurrentTime();
@@ -496,7 +475,11 @@ public class LocationController extends BaseController implements NotificationCe
                         NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.liveLocationsChanged);
                     });
                     a--;
+                    expired = true;
                 }
+            }
+            if (expired && sharingLocations.isEmpty()) {
+                stop(true);
             }
         }
         if (started) {
@@ -509,8 +492,8 @@ public class LocationController extends BaseController implements NotificationCe
                 lastLocationSendTime = SystemClock.elapsedRealtime();
                 broadcastLastKnownLocation(cancelAll);
             }
-        } else if (!sharingLocations.isEmpty() || shareMyCurrentLocation) {
-            if (shareMyCurrentLocation || Math.abs(lastLocationSendTime - SystemClock.elapsedRealtime()) > BACKGROUD_UPDATE_TIME) {
+        } else if (!sharingLocations.isEmpty()) {
+            if (Math.abs(lastLocationSendTime - SystemClock.elapsedRealtime()) > BACKGROUD_UPDATE_TIME) {
                 lastLocationStartTime = SystemClock.elapsedRealtime();
                 start();
             }
@@ -521,10 +504,11 @@ public class LocationController extends BaseController implements NotificationCe
         if (!shouldStopGps()) {
             return false;
         }
-        if (Math.abs(lastLocationSendTime - SystemClock.elapsedRealtime()) >= SEND_NEW_LOCATION_TIME) {
-            return true;
+        if (Math.abs(lastLocationSendTime - SystemClock.elapsedRealtime()) < SEND_NEW_LOCATION_TIME) {
+            return false;
         }
-        return false;
+        // wait for a fix taken after the provider was started, update() sends anyway after LOCATION_ACQUIRE_TIME
+        return lastKnownLocation != null && lastKnownLocation.getElapsedRealtimeNanos() / 1000000 >= lastLocationStartTime;
     }
 
     public void cleanup() {
@@ -532,8 +516,6 @@ public class LocationController extends BaseController implements NotificationCe
         sharingLocationsMapUI.clear();
         locationsCache.clear();
         cacheRequests.clear();
-        cachedNearbyUsers.clear();
-        cachedNearbyChats.clear();
         lastReadLocationTime.clear();
         stopService();
         Utilities.stageQueue.postRunnable(() -> {
@@ -554,19 +536,6 @@ public class LocationController extends BaseController implements NotificationCe
         if (lastKnownLocation != null) {
             AndroidUtilities.runOnUIThread(() -> NotificationCenter.getGlobalInstance().postNotificationName(NotificationCenter.newLocationAvailable));
         }
-    }
-
-    public void setCachedNearbyUsersAndChats(ArrayList<TLRPC.TL_peerLocated> u, ArrayList<TLRPC.TL_peerLocated> c) {
-        cachedNearbyUsers = new ArrayList<>(u);
-        cachedNearbyChats = new ArrayList<>(c);
-    }
-
-    public ArrayList<TLRPC.TL_peerLocated> getCachedNearbyUsers() {
-        return cachedNearbyUsers;
-    }
-
-    public ArrayList<TLRPC.TL_peerLocated> getCachedNearbyChats() {
-        return cachedNearbyChats;
     }
 
     protected void addSharingLocation(TLRPC.Message message) {
@@ -682,9 +651,7 @@ public class LocationController extends BaseController implements NotificationCe
                 if (!chatsToLoad.isEmpty()) {
                     getMessagesStorage().getChatsInternal(TextUtils.join(",", chatsToLoad), chats);
                 }
-                if (!usersToLoad.isEmpty()) {
-                    getMessagesStorage().getUsersInternal(TextUtils.join(",", usersToLoad), users);
-                }
+                getMessagesStorage().getUsersInternal(usersToLoad, users);
             } catch (Exception e) {
                 FileLog.e(e);
             }
@@ -787,18 +754,40 @@ public class LocationController extends BaseController implements NotificationCe
 
     private void startService() {
         try {
-            /*if (Build.VERSION.SDK_INT >= 26) {
-                ApplicationLoader.applicationContext.startForegroundService(new Intent(ApplicationLoader.applicationContext, LocationSharingService.class));
-            } else {*/
+            if (PermissionRequest.hasPermission(Manifest.permission.ACCESS_COARSE_LOCATION) || PermissionRequest.hasPermission(Manifest.permission.ACCESS_FINE_LOCATION)) {
                 ApplicationLoader.applicationContext.startService(new Intent(ApplicationLoader.applicationContext, LocationSharingService.class));
-            //}
+            } else {
+                LocationSharingService.showPausedNotification();
+            }
         } catch (Throwable e) {
+            // not allowed from background, onAppResumed restarts it once the app is visible
             FileLog.e(e);
+            LocationSharingService.showPausedNotification();
         }
     }
 
     private void stopService() {
+        if (getLocationsCount() > 0) {
+            // other accounts are still sharing
+            return;
+        }
+        LocationSharingService.hidePausedNotification();
         ApplicationLoader.applicationContext.stopService(new Intent(ApplicationLoader.applicationContext, LocationSharingService.class));
+    }
+
+    // startService fails silently in background (after a process restart or a service timeout), so the sharing
+    // would stay in UI without updates and expiration checks; restart the service once the app is visible
+    public static void onAppResumed() {
+        for (int a = 0; a < UserConfig.MAX_ACCOUNT_COUNT; a++) {
+            if (!UserConfig.getInstance(a).isClientActivated()) {
+                continue;
+            }
+            final LocationController controller = getInstance(a);
+            if (!controller.sharingLocationsUI.isEmpty()) {
+                controller.startService();
+                return;
+            }
+        }
     }
 
     public void removeAllLocationSharings() {
@@ -892,9 +881,6 @@ public class LocationController extends BaseController implements NotificationCe
     }
 
     private void stop(boolean empty) {
-        if (lookingForPeopleNearby || shareMyCurrentLocation) {
-            return;
-        }
         started = false;
         if (checkServices()) {
             try {
@@ -909,17 +895,6 @@ public class LocationController extends BaseController implements NotificationCe
             locationManager.removeUpdates(networkLocationListener);
             locationManager.removeUpdates(passiveLocationListener);
         }
-    }
-
-    public void startLocationLookupForPeopleNearby(boolean stop) {
-        Utilities.stageQueue.postRunnable(() -> {
-            lookingForPeopleNearby = !stop;
-            if (lookingForPeopleNearby) {
-                start();
-            } else if (sharingLocations.isEmpty()) {
-                stop(true);
-            }
-        });
     }
 
     public Location getLastKnownLocation() {
@@ -1006,6 +981,30 @@ public class LocationController extends BaseController implements NotificationCe
     }
 
     public static final int TYPE_BIZ = 1;
+    public static final int TYPE_STORY = 2;
+
+    // google geocoder thinks that "unnamed road" is a street name
+    public static String[] unnamedRoads = {
+        "Unnamed Road",
+        "Вulicya bez nazvi",
+        "Нeizvestnaya doroga",
+        "İsimsiz Yol",
+        "Ceļš bez nosaukuma",
+        "Kelias be pavadinimo",
+        "Droga bez nazwy",
+        "Cesta bez názvu",
+        "Silnice bez názvu",
+        "Drum fără nume",
+        "Route sans nom",
+        "Vía sin nombre",
+        "Estrada sem nome",
+        "Οdos xoris onomasia",
+        "Rrugë pa emër",
+        "Пat bez ime",
+        "Нeimenovani put",
+        "Strada senza nome",
+        "Straße ohne Straßennamen"
+    };
 
     private static HashMap<LocationFetchCallback, Runnable> callbacks = new HashMap<>();
     public static void fetchLocationAddress(Location location, LocationFetchCallback callback) {
@@ -1026,22 +1025,42 @@ public class LocationController extends BaseController implements NotificationCe
         }
 
         Locale locale;
+        Locale englishLocale;
         try {
             locale = LocaleController.getInstance().getCurrentLocale();
         } catch (Exception ignore) {
             locale = LocaleController.getInstance().getSystemDefaultLocale();
         }
+        if (locale.getLanguage().contains("en")) {
+            englishLocale = locale;
+        } else {
+            englishLocale = Locale.US;
+        }
         final Locale finalLocale = locale;
         Utilities.globalQueue.postRunnable(fetchLocationRunnable = () -> {
-            String name, displayName, city, street, countryCode = null;
+            String name, displayName, city, street, countryCode = null, locality = null, feature = null, engFeature = null;
+            String engState = null, engCity = null;
+            StringBuilder engStreet = new StringBuilder();
             boolean onlyCountry = true;
             TLRPC.TL_messageMediaVenue cityLocation = null;
+            TL_stories.TL_geoPointAddress cityAddress = new TL_stories.TL_geoPointAddress();
             TLRPC.TL_messageMediaVenue streetLocation = null;
+            TL_stories.TL_geoPointAddress streetAddress = new TL_stories.TL_geoPointAddress();
             try {
                 Geocoder gcd = new Geocoder(ApplicationLoader.applicationContext, finalLocale);
                 List<Address> addresses = gcd.getFromLocation(location.getLatitude(), location.getLongitude(), 1);
+                List<Address> engAddresses = null;
+                if (type == TYPE_STORY) {
+                    if (englishLocale == finalLocale) {
+                        engAddresses = addresses;
+                    } else {
+                        Geocoder gcd2 = new Geocoder(ApplicationLoader.applicationContext, englishLocale);
+                        engAddresses = gcd2.getFromLocation(location.getLatitude(), location.getLongitude(), 1);
+                    }
+                }
                 if (addresses.size() > 0) {
                     Address address = addresses.get(0);
+                    Address engAddress = engAddresses != null && engAddresses.size() >= 1 ? engAddresses.get(0) : null;
                     if (type == TYPE_BIZ) {
                         ArrayList<String> parts = new ArrayList<>();
 
@@ -1099,8 +1118,6 @@ public class LocationController extends BaseController implements NotificationCe
                         StringBuilder cityBuilder = new StringBuilder();
                         StringBuilder streetBuilder = new StringBuilder();
 
-                        String locality = null;
-                        String feature = null;
 //                    String addressLine = null;
 //                    try {
 //                        addressLine = address.getAddressLine(0);
@@ -1121,15 +1138,30 @@ public class LocationController extends BaseController implements NotificationCe
 ////                            feature = parts[0].replace(",", "").trim();
 //                        }
 //                    }
+
                         if (TextUtils.isEmpty(locality)) {
                             locality = address.getLocality();
                         }
                         if (TextUtils.isEmpty(locality)) {
-                            locality = address.getSubAdminArea();
-                        }
-                        if (TextUtils.isEmpty(locality)) {
                             locality = address.getAdminArea();
                         }
+                        if (TextUtils.isEmpty(locality)) {
+                            locality = address.getSubAdminArea();
+                        }
+                        if (engAddress != null) {
+                            if (TextUtils.isEmpty(engCity)) {
+                                engCity = engAddress.getLocality();
+                            }
+                            if (TextUtils.isEmpty(engCity)) {
+                                engCity = engAddress.getAdminArea();
+                            }
+                            if (TextUtils.isEmpty(engCity)) {
+                                engCity = engAddress.getSubAdminArea();
+                            }
+
+                            engState = engAddress.getAdminArea();
+                        }
+
                         if (TextUtils.isEmpty(feature) && !TextUtils.equals(address.getThoroughfare(), locality) && !TextUtils.equals(address.getThoroughfare(), address.getCountryName())) {
                             feature = address.getThoroughfare();
                         }
@@ -1147,6 +1179,41 @@ public class LocationController extends BaseController implements NotificationCe
                         } else {
                             streetBuilder = null;
                         }
+
+                        if (engAddress != null) {
+                            if (TextUtils.isEmpty(engFeature) && !TextUtils.equals(engAddress.getThoroughfare(), locality) && !TextUtils.equals(engAddress.getThoroughfare(), engAddress.getCountryName())) {
+                                engFeature = engAddress.getThoroughfare();
+                            }
+                            if (TextUtils.isEmpty(engFeature) && !TextUtils.equals(engAddress.getSubLocality(), locality) && !TextUtils.equals(engAddress.getSubLocality(), engAddress.getCountryName())) {
+                                engFeature = engAddress.getSubLocality();
+                            }
+                            if (TextUtils.isEmpty(engFeature) && !TextUtils.equals(engAddress.getLocality(), locality) && !TextUtils.equals(engAddress.getLocality(), engAddress.getCountryName())) {
+                                engFeature = engAddress.getLocality();
+                            }
+                            if (!TextUtils.isEmpty(engFeature) && !TextUtils.equals(engFeature, engState) && !TextUtils.equals(engFeature, engAddress.getCountryName())) {
+                                if (engStreet.length() > 0) {
+                                    engStreet.append(", ");
+                                }
+                                engStreet.append(engFeature);
+                            } else {
+                                engStreet = null;
+                            }
+
+                            if (!TextUtils.isEmpty(engStreet)) {
+                                boolean isUnnamed = false;
+                                for (int i = 0; i < unnamedRoads.length; ++i) {
+                                    if (unnamedRoads[i].equalsIgnoreCase(engStreet.toString())) {
+                                        isUnnamed = true;
+                                        break;
+                                    }
+                                }
+                                if (isUnnamed) {
+                                    engStreet = null;
+                                    streetBuilder = null;
+                                }
+                            }
+                        }
+
                         if (!TextUtils.isEmpty(locality)) {
                             if (cityBuilder.length() > 0) {
                                 cityBuilder.append(", ");
@@ -1274,9 +1341,22 @@ public class LocationController extends BaseController implements NotificationCe
                     cityLocation.geo._long = location.getLongitude();
                     cityLocation.query_id = -1;
                     cityLocation.title = city;
-                    cityLocation.icon = onlyCountry ? "https://ss3.4sqi.net/img/categories_v2/building/government_capitolbuilding_64.png" : "https://ss3.4sqi.net/img/categories_v2/travel/hotel_64.png";
+                    cityLocation.icon = onlyCountry ? "country" : "city";
                     cityLocation.emoji = countryCodeToEmoji(countryCode);
-                    cityLocation.address = onlyCountry ? LocaleController.getString("Country", R.string.Country) : LocaleController.getString("PassportCity", R.string.PassportCity);
+                    cityLocation.address = onlyCountry ? LocaleController.getString(R.string.Country) : LocaleController.getString(R.string.PassportCity);
+
+                    cityLocation.geoAddress = cityAddress;
+                    cityAddress.country_iso2 = countryCode;
+                    if (!onlyCountry) {
+                        if (!TextUtils.isEmpty(engState)) {
+                            cityAddress.flags |= 1;
+                            cityAddress.state = engState;
+                        }
+                        if (!TextUtils.isEmpty(engCity)) {
+                            cityAddress.flags |= 2;
+                            cityAddress.city = engCity;
+                        }
+                    }
                 }
                 if (!TextUtils.isEmpty(street)) {
                     streetLocation = new TLRPC.TL_messageMediaVenue();
@@ -1286,7 +1366,22 @@ public class LocationController extends BaseController implements NotificationCe
                     streetLocation.query_id = -1;
                     streetLocation.title = street;
                     streetLocation.icon = "pin";
-                    streetLocation.address = LocaleController.getString("PassportStreet1", R.string.PassportStreet1);
+                    streetLocation.address = LocaleController.getString(R.string.PassportStreet1);
+
+                    streetLocation.geoAddress = streetAddress;
+                    streetAddress.country_iso2 = countryCode;
+                    if (!TextUtils.isEmpty(engState)) {
+                        streetAddress.flags |= 1;
+                        streetAddress.state = engState;
+                    }
+                    if (!TextUtils.isEmpty(engCity)) {
+                        streetAddress.flags |= 2;
+                        streetAddress.city = engCity;
+                    }
+                    if (!TextUtils.isEmpty(engStreet)) {
+                        streetAddress.flags |= 4;
+                        streetAddress.street = engStreet.toString();
+                    }
                 }
                 if (cityLocation == null && streetLocation == null && location != null) {
                     String ocean = detectOcean(location.getLongitude(), location.getLatitude());

@@ -1,5 +1,6 @@
 package org.telegram.ui.Components.Premium.boosts.cells;
 
+import org.telegram.messenger.FileLog;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.PorterDuff;
@@ -11,15 +12,14 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.LocaleController;
-import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
-import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.LayoutHelper;
 
 @SuppressLint("ViewConstructor")
-public class ChatCell extends BaseCell {
+public class ChatCell extends BaseCell implements Theme.Colorable {
 
     public interface ChatDeleteListener {
         void onChatDeleted(TLRPC.Chat chat);
@@ -32,14 +32,14 @@ public class ChatCell extends BaseCell {
 
     public ChatCell(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context, resourcesProvider);
-        titleTextView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        titleTextView.setTypeface(AndroidUtilities.bold());
         deleteImageView = new ImageView(context);
         deleteImageView.setFocusable(false);
         deleteImageView.setScaleType(ImageView.ScaleType.CENTER);
-        deleteImageView.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_stickers_menuSelector)));
+        deleteImageView.setBackground(Theme.createSelectorDrawable(deleteSelectorColor = Theme.getColor(Theme.key_stickers_menuSelector)));
         deleteImageView.setImageResource(R.drawable.poll_remove);
-        deleteImageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayIcon), PorterDuff.Mode.MULTIPLY));
-        deleteImageView.setContentDescription(LocaleController.getString("Delete", R.string.Delete));
+        ThemeBind.colorFilter(deleteImageView, Theme.key_windowBackgroundWhiteGrayIcon, PorterDuff.Mode.MULTIPLY);
+        deleteImageView.setContentDescription(LocaleController.getString(R.string.Delete));
         addView(deleteImageView, LayoutHelper.createFrame(48, 50, (LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT) | Gravity.CENTER, LocaleController.isRTL ? 3 : 0, 0, LocaleController.isRTL ? 0 : 3, 0));
         titleTextView.setPadding(AndroidUtilities.dp(LocaleController.isRTL ? 24 : 0), 0, AndroidUtilities.dp(LocaleController.isRTL ? 0 : 24), 0);
     }
@@ -83,7 +83,7 @@ public class ChatCell extends BaseCell {
             setSubtitle(LocaleController.formatPluralString(isChannel ? "BoostingChannelWillReceiveBoost" : "BoostingGroupWillReceiveBoost", boosts));
         }
 
-        subtitleTextView.setTextColor(Theme.getColor(Theme.key_dialogTextGray3, resourcesProvider));
+        ThemeBind.textColor(subtitleTextView, Theme.key_dialogTextGray3, resourcesProvider);
         setDivider(true);
         if (removable) {
             deleteImageView.setVisibility(VISIBLE);
@@ -113,6 +113,22 @@ public class ChatCell extends BaseCell {
             setSubtitle(subtitle);
         } else {
             setSubtitle(LocaleController.formatPluralString(isChannel ? "BoostingChannelWillReceiveBoost" : "BoostingGroupWillReceiveBoost", count));
+        }
+    }
+
+    private int deleteSelectorColor;
+
+    @Override
+    public void updateColors() {
+        try {
+            final int color = Theme.getColor(Theme.key_stickers_menuSelector);
+            if (deleteImageView != null && color != deleteSelectorColor) {
+                deleteSelectorColor = color;
+                Theme.setSelectorDrawableColor(deleteImageView.getBackground(), color, true);
+                deleteImageView.invalidate();
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
         }
     }
 }

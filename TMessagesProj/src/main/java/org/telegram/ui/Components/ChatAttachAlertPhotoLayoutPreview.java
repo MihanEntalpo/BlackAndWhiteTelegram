@@ -1,5 +1,6 @@
 package org.telegram.ui.Components;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.MessageObject.POSITION_FLAG_BOTTOM;
 import static org.telegram.messenger.MessageObject.POSITION_FLAG_LEFT;
 import static org.telegram.messenger.MessageObject.POSITION_FLAG_RIGHT;
@@ -12,9 +13,9 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.Path;
+import android.graphics.PointF;
 import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Region;
@@ -36,7 +37,6 @@ import android.view.animation.Interpolator;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.core.graphics.ColorUtils;
 import androidx.core.math.MathUtils;
 import androidx.exifinterface.media.ExifInterface;
 import androidx.recyclerview.widget.LinearLayoutManager;
@@ -57,12 +57,15 @@ import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.ActionBarMenu;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.MessageDrawable;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.ChatActionCell;
 import org.telegram.ui.ChatActivity;
-import org.telegram.ui.Components.spoilers.SpoilerEffect;
+import org.telegram.ui.Components.spoilers.SpoilerEffect2;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.PhotoViewer;
+import org.telegram.ui.Stars.StarsIntroActivity;
 
 import java.util.ArrayList;
 import java.util.Arrays;
@@ -102,6 +105,8 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
         super(alert, context, themeDelegate);
 
         this.themeDelegate = themeDelegate;
+        occupyNavigationBar = true;
+
         setWillNotDraw(false);
 
         ActionBarMenu menu = parentAlert.actionBar.createMenu();
@@ -121,9 +126,9 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
         header.setLines(1);
         header.setMaxLines(1);
         header.setEllipsize(TextUtils.TruncateAt.END);
-        header.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
-        header.setText(LocaleController.getString("AttachMediaPreview", R.string.AttachMediaPreview));
-        header.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        ThemeBind.textColor(header, Theme.key_dialogTextBlack, resourcesProvider);
+        header.setText(LocaleController.getString(R.string.AttachMediaPreview));
+        header.setTypeface(AndroidUtilities.bold());
         header.setCompoundDrawablePadding(AndroidUtilities.dp(4));
         header.setPadding(0, 0, AndroidUtilities.dp(10), 0);
         header.setAlpha(0);
@@ -177,7 +182,6 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
         listView.setClipToPadding(false);
         listView.setOverScrollMode(RecyclerListView.OVER_SCROLL_NEVER);
         listView.setVerticalScrollBarEnabled(false);
-        listView.setPadding(0, 0, 0, AndroidUtilities.dp(46));
 
         groupsView = new PreviewGroupsView(context);
         groupsView.setClipToPadding(true);
@@ -233,6 +237,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                     if (parentAlert.getPhotoLayout() != null) {
                         parentAlert.getPhotoLayout().previewItem.setIcon(R.drawable.ic_ab_back);
                         parentAlert.getPhotoLayout().previewItem.setText(LocaleController.getString(R.string.Back));
+                        parentAlert.getPhotoLayout().previewItem.setRightIcon(0);
                     }
                 }
             }, 250);
@@ -263,6 +268,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             if (parentAlert.getPhotoLayout() != null) {
                 parentAlert.getPhotoLayout().previewItem.setIcon(R.drawable.msg_view_file);
                 parentAlert.getPhotoLayout().previewItem.setText(LocaleController.getString(R.string.AttachMediaPreviewButton));
+                parentAlert.getPhotoLayout().previewItem.setRightIcon(R.drawable.msg_arrowright);
             }
         }
 
@@ -391,12 +397,10 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                     rotate = false;
                     try {
                         if (photo.isVideo) {
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.JELLY_BEAN_MR1) {
-                                MediaMetadataRetriever m = new MediaMetadataRetriever();
-                                m.setDataSource(photo.path);
-                                String rotation = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
-                                rotate = rotation != null && (rotation.equals("90") || rotation.equals("270"));
-                            }
+                            MediaMetadataRetriever m = new MediaMetadataRetriever();
+                            m.setDataSource(photo.path);
+                            String rotation = m.extractMetadata(MediaMetadataRetriever.METADATA_KEY_VIDEO_ROTATION);
+                            rotate = rotation != null && (rotation.equals("90") || rotation.equals("270"));
                         } else {
                             ExifInterface exif = new ExifInterface(photo.path);
                             int orientation = exif.getAttributeInt(ExifInterface.TAG_ORIENTATION, ExifInterface.ORIENTATION_NORMAL);
@@ -816,8 +820,8 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             paddingTop = 0;
         }
 //        paddingTop -= AndroidUtilities.dp(9);
-        if (listView.getPaddingTop() != paddingTop) {
-            listView.setPadding(listView.getPaddingLeft(), paddingTop, listView.getPaddingRight(), listView.getPaddingBottom());
+        if (listView.getPaddingTop() != paddingTop || listView.getPaddingBottom() != listPaddingBottom) {
+            listView.setPaddingWithoutRequestLayout(listView.getPaddingLeft(), paddingTop, listView.getPaddingRight(), listPaddingBottom);
             invalidate();
         }
 
@@ -925,7 +929,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             setWillNotDraw(false);
 
             hintView = new ChatActionCell(context, true, themeDelegate);
-            hintView.setCustomText(LocaleController.getString("AttachMediaDragHint", R.string.AttachMediaDragHint));
+            hintView.setCustomText(LocaleController.getString(R.string.AttachMediaDragHint));
             addView(hintView);
         }
 
@@ -965,6 +969,9 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
         }
 
         public void fromPhotoArrays() {
+            for (int i = 0; i < groupCells.size(); ++i) {
+                groupCells.get(i).detach();
+            }
             groupCells.clear();
             ArrayList<MediaController.PhotoEntry> photos = new ArrayList<>();
             final int photosOrderSize = photosOrder.size(),
@@ -1205,13 +1212,14 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             hintView.setVisiblePart(y, hintView.getMeasuredHeight());
             if (hintView.hasGradientService()) {
                 hintView.drawBackground(canvas, true);
+                hintView.drawReactions(canvas, true, null);
             }
             hintView.draw(canvas);
             canvas.restore();
 
             if (draggingCell != null) {
                 canvas.save();
-                Point point = dragTranslate();
+                PointF point = dragTranslate();
                 canvas.translate(point.x, point.y);
                 if (draggingCell.draw(canvas, true)) {
                     invalidate();
@@ -1228,8 +1236,8 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
 
         private float draggingT = 0;
         private float savedDragFromX, savedDragFromY, savedDraggingT;
-        private final Point tmpPoint = new Point();
-        Point dragTranslate() {
+        private final PointF tmpPoint = new PointF();
+        PointF dragTranslate() {
             if (draggingCell == null) {
                 tmpPoint.x = 0;
                 tmpPoint.y = 0;
@@ -1271,7 +1279,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                 draggingAnimator.cancel();
             }
 
-            Point dragTranslate = dragTranslate();
+            PointF dragTranslate = dragTranslate();
             savedDraggingT = draggingT;
             savedDragFromX = dragTranslate.x;
             savedDragFromY = dragTranslate.y;
@@ -1474,7 +1482,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             }
 
             @Override
-            public PhotoViewer.PlaceProviderObject getPlaceForPhoto(MessageObject messageObject, TLRPC.FileLocation fileLocation, int index, boolean needPreview) {
+            public PhotoViewer.PlaceProviderObject getPlaceForPhoto(MessageObject messageObject, TLRPC.FileLocation fileLocation, int index, boolean needPreview, boolean closing) {
                 if (index < 0 || index >= photos.size() || !isPhotoChecked(index)) {
                     return null;
                 }
@@ -1608,7 +1616,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             if (draggingCell != null) {
                 groupY = 0;
                 RectF drawingRect = draggingCell.rect();
-                Point dragPoint = dragTranslate();
+                PointF dragPoint = dragTranslate();
                 RectF draggingCellXY = new RectF();
                 float cx = dragPoint.x, cy = dragPoint.y;
                 draggingCellXY.set(
@@ -1834,7 +1842,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                         ArrayList<Object> objectArrayList = new ArrayList<>(arrayList);
                         PhotoViewer.getInstance().openPhotoForSelect(objectArrayList, position, type, false, photoViewerProvider, chatActivity);
                         if (photoLayout.captionForAllMedia()) {
-                            PhotoViewer.getInstance().setCaption(parentAlert.getCommentTextView().getText());
+                            PhotoViewer.getInstance().setCaption(parentAlert.getCommentView().getText());
                         }
                     }
                     tapMediaCell = null;
@@ -1911,6 +1919,13 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
             private float groupWidth = 0, groupHeight = 0;
             private float previousGroupWidth = 0, previousGroupHeight = 0;
             public ArrayList<MediaCell> media = new ArrayList<>();
+            public long stars;
+
+            public void detach() {
+                for (int i = 0; i < media.size(); ++i) {
+                    media.get(i).detach();
+                }
+            }
 
             private class MediaCell {
                 public PreviewGroupCell groupCell = PreviewGroupCell.this;
@@ -1937,7 +1952,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
 
                 private String videoDurationText = null;
 
-                private SpoilerEffect spoilerEffect = new SpoilerEffect();
+                private SpoilerEffect2 spoilerEffect;
                 private Path path = new Path();
                 private float[] radii = new float[8];
 
@@ -1962,6 +1977,13 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                     spoilerCrossfadeBitmap = bitmap;
                     spoilerCrossfadeProgress = 0f;
                     invalidate();
+                }
+
+                public void detach() {
+                    if (spoilerEffect != null) {
+                        spoilerEffect.detach(PreviewGroupsView.this);
+                        spoilerEffect = null;
+                    }
                 }
 
                 private void setImage(MediaController.PhotoEntry photoEntry) {
@@ -2186,7 +2208,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
 
                         if (textPaint == null) {
                             textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-                            textPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+                            textPaint.setTypeface(AndroidUtilities.bold());
                         }
                         textPaint.setColor(getThemedColor(Theme.key_chat_attachCheckBoxCheck));
                         final float textSize;
@@ -2229,7 +2251,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                         if (videoDurationBitmap == null || videoDurationBitmapText == null || !videoDurationBitmapText.equals(durationText)) {
                             if (videoDurationTextPaint == null) {
                                 videoDurationTextPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-                                videoDurationTextPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+                                videoDurationTextPaint.setTypeface(AndroidUtilities.bold());
                                 videoDurationTextPaint.setColor(0xffffffff);
                             }
                             final float textSize = AndroidUtilities.dp(12);
@@ -2358,10 +2380,10 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                         blurredImage.setAlpha(scale);
                         blurredImage.draw(canvas);
 
-                        int sColor = Color.WHITE;
-                        spoilerEffect.setColor(ColorUtils.setAlphaComponent(sColor, (int) (Color.alpha(sColor) * 0.325f * scale)));
-                        spoilerEffect.setBounds(0, 0, getWidth(), getHeight());
-                        spoilerEffect.draw(canvas);
+                        if (spoilerEffect == null) {
+                            spoilerEffect = SpoilerEffect2.getInstance(PreviewGroupsView.this);
+                        }
+                        spoilerEffect.draw(canvas, PreviewGroupsView.this, getWidth(), getHeight());
                         canvas.restore();
 
                         invalidate();
@@ -2440,11 +2462,13 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                 groupWidth = group.width / 1000f;
                 groupHeight = group.height;
                 lastMediaUpdate = animated ? now : 0;
+                stars = 0;
                 List<MediaController.PhotoEntry> photoEntries = new ArrayList<>(group.positions.keySet());
                 final int photoEntriesCount = photoEntries.size();
                 for (int j = 0; j < photoEntriesCount; ++j) {
                     MediaController.PhotoEntry photoEntry = photoEntries.get(j);
                     MessageObject.GroupedMessagePosition pos = group.positions.get(photoEntry);
+                    stars = Math.max(stars, photoEntry.starsAmount);
                     MediaCell properCell = null;
                     final int mediaCount = media.size();
                     for (int i = 0; i < mediaCount; ++i) {
@@ -2471,6 +2495,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                     if (!group.positions.containsKey(cell.photoEntry)) {
                         // old cell, remove it
                         if (cell.scale <= 0 && cell.lastUpdate + cell.updateDuration <= now) {
+                            cell.detach();
                             media.remove(i);
                             i--;
                             mediaCount--;
@@ -2502,8 +2527,13 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                 return getT() >= 0.95f ? this.groupHeight * maxHeight * getPreviewScale() : measure();
             }
 
-            private Theme.MessageDrawable messageBackground = (Theme.MessageDrawable) getThemedDrawable(Theme.key_drawable_msgOutMedia);
-            private Theme.MessageDrawable.PathDrawParams backgroundCacheParams = new Theme.MessageDrawable.PathDrawParams();
+            private final RectF buttonTextRect = new RectF();
+            private Text buttonText;
+            private long buttonTextPrice;
+            private final Paint buttonTextBgPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+            private final MessageDrawable messageBackground = (MessageDrawable) getThemedDrawable(Theme.key_drawable_msgOutMedia);
+            private final MessageDrawable.PathDrawParams backgroundCacheParams = new MessageDrawable.PathDrawParams();
             public boolean draw(Canvas canvas) {
                 boolean update = false;
                 final float t = interpolator.getInterpolation(Math.min(1, (SystemClock.elapsedRealtime() - lastMediaUpdate) / (float) updateDuration));
@@ -2538,6 +2568,7 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
 
                 width = right - left;
                 height = bottom - top;
+
                 final int count = media.size();
                 for (int i = 0; i < count; ++i) {
                     MediaCell cell = media.get(i);
@@ -2551,7 +2582,29 @@ public class ChatAttachAlertPhotoLayoutPreview extends ChatAttachAlert.AttachAle
                         update = true;
                     }
                 }
+
+                drawStarsButton(canvas);
+
                 return update;
+            }
+
+            public void drawStarsButton(Canvas canvas) {
+                if (stars <= 0) return;
+
+                if (buttonText == null || buttonTextPrice != stars) {
+                    buttonText = new Text(StarsIntroActivity.replaceStarsWithPlain(LocaleController.formatPluralStringComma("UnlockPaidContent", (int) (buttonTextPrice = stars)), .7f), 14, AndroidUtilities.bold());
+                }
+                final float buttonWidth = dp(14 + 14) + buttonText.getCurrentWidth();
+                final float buttonHeight = dp(32);
+                buttonTextRect.set(
+                        left + (width - buttonWidth) / 2f,
+                        top + (height - buttonHeight) / 2f,
+                        left + (width + buttonWidth) / 2f,
+                        top + (height + buttonHeight) / 2f
+                );
+                buttonTextBgPaint.setColor(0x60000000);
+                canvas.drawRoundRect(buttonTextRect, buttonHeight / 2f, buttonHeight / 2f, buttonTextBgPaint);
+                buttonText.draw(canvas, left + width / 2f - buttonWidth / 2f + dp(14), top + height / 2f, 0xFFFFFFFF, 1f);
             }
         }
     }

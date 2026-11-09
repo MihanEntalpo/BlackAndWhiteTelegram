@@ -16,6 +16,7 @@ import androidx.viewpager.widget.ViewPager;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
@@ -28,7 +29,7 @@ public class StoriesViewPager extends ViewPager {
     long daysDialogId;
     ArrayList<ArrayList<Integer>> days;
 
-    int currentAccount = UserConfig.selectedAccount;
+    int currentAccount;
     PagerAdapter pagerAdapter;
     ArrayList<Long> dialogs = new ArrayList<>();
     PeerStoriesView.Delegate delegate;
@@ -57,8 +58,24 @@ public class StoriesViewPager extends ViewPager {
     private int selectedPositionInPage;
     private int updateVisibleItemPosition = -1;
 
-    public StoriesViewPager(@NonNull Context context, StoryViewer storyViewer, Theme.ResourcesProvider resourcesProvider) {
+    private final ArrayList<PeerStoriesView> cachedViews = new ArrayList<>();
+
+    /** The pager is dropped when the story viewer window closes: release what its pages registered globally */
+    public void onDestroy() {
+        for (int i = 0; i < getChildCount(); i++) {
+            final View child = getChildAt(i);
+            if (child instanceof PageLayout && ((PageLayout) child).peerStoryView != null) {
+                ((PageLayout) child).peerStoryView.onDestroy();
+            }
+        }
+        for (int i = 0; i < cachedViews.size(); i++) {
+            cachedViews.get(i).onDestroy();
+        }
+    }
+
+    public StoriesViewPager(int account, @NonNull Context context, StoryViewer storyViewer, Theme.ResourcesProvider resourcesProvider) {
         super(context);
+        this.currentAccount = account;
         resources = new PeerStoriesView.SharedResources(context);
         this.storyViewer = storyViewer;
         setAdapter(pagerAdapter = new PagerAdapter() {
@@ -69,8 +86,6 @@ public class StoriesViewPager extends ViewPager {
                 }
                 return dialogs.size();
             }
-
-            private final ArrayList<PeerStoriesView> cachedViews = new ArrayList<>();
 
             @NonNull
             @Override
@@ -98,7 +113,12 @@ public class StoriesViewPager extends ViewPager {
                 pageLayout.setTag(position);
                 if (days != null) {
                     pageLayout.day = days.get(storyViewer.reversed ? days.size() - 1 - position : position);
-                    pageLayout.dialogId = daysDialogId;
+                    if (storyViewer.storiesList instanceof StoriesController.SearchStoriesList || storyViewer.storiesList instanceof StoriesController.StoryRepostsList) {
+                        MessageObject msg = storyViewer.storiesList.findMessageObject(pageLayout.day.get(0));
+                        pageLayout.dialogId = msg == null ? daysDialogId : msg.getDialogId();
+                    } else {
+                        pageLayout.dialogId = daysDialogId;
+                    }
                 } else {
                     pageLayout.day = null;
                     pageLayout.dialogId = dialogs.get(position);
@@ -254,9 +274,18 @@ public class StoriesViewPager extends ViewPager {
     }
 
     public void setDays(long dialogId, ArrayList<ArrayList<Integer>> days, int currentAccount) {
+        if (this.daysDialogId == dialogId && eqA(this.days, days) && this.currentAccount == currentAccount) {
+            return;
+        }
+        final boolean appendOnly = this.daysDialogId == dialogId && this.currentAccount == currentAccount && isPrefix(this.days, days);
         this.daysDialogId = dialogId;
         this.days = days;
         this.currentAccount = currentAccount;
+        if (appendOnly && pagerAdapter != null) {
+            pagerAdapter.notifyDataSetChanged();
+            updateDelegate = true;
+            return;
+        }
         setAdapter(null);
         setAdapter(pagerAdapter);
         int position;
@@ -270,6 +299,36 @@ public class StoriesViewPager extends ViewPager {
         }
         setCurrentItem(position);
         updateDelegate = true;
+    }
+
+    private static boolean isPrefix(ArrayList<ArrayList<Integer>> a, ArrayList<ArrayList<Integer>> b) {
+        if (a == null || b == null) return false;
+        if (b.size() <= a.size()) return false;
+        for (int i = 0; i < a.size(); i++) {
+            if (!eq(a.get(i), b.get(i))) return false;
+        }
+        return true;
+    }
+
+    private static boolean eqA(ArrayList<ArrayList<Integer>> a, ArrayList<ArrayList<Integer>> b) {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); ++i) {
+            if (!eq(a.get(i), b.get(i)))
+                return false;
+        }
+        return true;
+    }
+    public static boolean eq(ArrayList<Integer> a, ArrayList<Integer> b) {
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        if (a.size() != b.size()) return false;
+        for (int i = 0; i < a.size(); ++i) {
+            if (a.get(i) != b.get(i))
+                return false;
+        }
+        return true;
     }
 
     @Override

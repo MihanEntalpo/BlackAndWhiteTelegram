@@ -5,6 +5,7 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Rect;
+import android.graphics.drawable.ShapeDrawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -25,6 +26,7 @@ import androidx.recyclerview.widget.ListUpdateCallback;
 import androidx.recyclerview.widget.RecyclerView;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
@@ -32,6 +34,7 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CombinedDrawable;
@@ -52,7 +55,7 @@ import java.util.Locale;
 import java.util.regex.Matcher;
 import java.util.regex.Pattern;
 
-public class FiltersView extends RecyclerListView {
+public class FiltersView extends RecyclerListView implements Theme.Colorable {
 
     public final static int FILTER_TYPE_MEDIA = 0;
     public final static int FILTER_TYPE_FILES = 1;
@@ -205,13 +208,7 @@ public class FiltersView extends RecyclerListView {
         setWillNotDraw(false);
         setHideIfEmpty(false);
         setSelectorRadius(AndroidUtilities.dp(28));
-        setSelectorDrawableColor(getThemedColor(Theme.key_listSelector));
-    }
-
-
-    @Override
-    protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(44), MeasureSpec.EXACTLY));
+        ThemeBind.listSelectorColor(this, Theme.key_listSelector, resourcesProvider);
     }
 
     public MediaFilterData getFilterAt(int i) {
@@ -232,7 +229,7 @@ public class FiltersView extends RecyclerListView {
                     TLRPC.User user = (TLRPC.User) object;
                     String title;
                     if (UserConfig.getInstance(UserConfig.selectedAccount).getCurrentUser().id == user.id) {
-                        title = LocaleController.getString("SavedMessages", R.string.SavedMessages);
+                        title = LocaleController.getString(R.string.SavedMessages);
                     } else {
                         title = ContactsController.formatName(user.first_name, user.last_name, 10);
                     }
@@ -292,7 +289,7 @@ public class FiltersView extends RecyclerListView {
         if (q.length() < 3) {
             return;
         }
-        if (LocaleController.getString("SearchTipToday", R.string.SearchTipToday).toLowerCase().startsWith(q) || "today".startsWith(q)) {
+        if (LocaleController.getString(R.string.SearchTipToday).toLowerCase().startsWith(q) || "today".startsWith(q)) {
             Calendar calendar = Calendar.getInstance();
             int year = calendar.get(Calendar.YEAR);
             int month = calendar.get(Calendar.MONTH);
@@ -301,11 +298,11 @@ public class FiltersView extends RecyclerListView {
             long minDate = calendar.getTimeInMillis();
             calendar.set(year, month, day + 1, 0, 0, 0);
             long maxDate = calendar.getTimeInMillis() - 1;
-            dates.add(new DateData(LocaleController.getString("SearchTipToday", R.string.SearchTipToday), minDate, maxDate));
+            dates.add(new DateData(LocaleController.getString(R.string.SearchTipToday), minDate, maxDate));
             return;
         }
 
-        if (LocaleController.getString("SearchTipYesterday", R.string.SearchTipYesterday).toLowerCase().startsWith(q) || "yesterday".startsWith(q)) {
+        if (LocaleController.getString(R.string.SearchTipYesterday).toLowerCase().startsWith(q) || "yesterday".startsWith(q)) {
             Calendar calendar = Calendar.getInstance();
             int year = calendar.get(Calendar.YEAR);
             int month = calendar.get(Calendar.MONTH);
@@ -314,7 +311,7 @@ public class FiltersView extends RecyclerListView {
             long minDate = calendar.getTimeInMillis() - 86400000L;
             calendar.set(year, month, day + 1, 0, 0, 0);
             long maxDate = calendar.getTimeInMillis() - 86400001L;
-            dates.add(new DateData(LocaleController.getString("SearchTipYesterday", R.string.SearchTipYesterday), minDate, maxDate));
+            dates.add(new DateData(LocaleController.getString(R.string.SearchTipYesterday), minDate, maxDate));
             return;
         }
         Matcher matcher;
@@ -334,7 +331,7 @@ public class FiltersView extends RecyclerListView {
             long minDate = calendar.getTimeInMillis();
             calendar.set(year, month, day + 1, 0, 0, 0);
             long maxDate = calendar.getTimeInMillis() - 1;
-            dates.add(new DateData(LocaleController.getInstance().formatterWeekLong.format(minDate), minDate, maxDate));
+            dates.add(new DateData(LocaleController.getInstance().getFormatterWeekLong().format(minDate), minDate, maxDate));
             return;
         }
         if ((matcher = shortDate.matcher(q)).matches()) {
@@ -382,7 +379,7 @@ public class FiltersView extends RecyclerListView {
                 long minDate = calendar.getTimeInMillis();
                 calendar.set(year, month, day + 1, 0, 0, 0);
                 long maxDate = calendar.getTimeInMillis() - 1;
-                dates.add(new DateData(LocaleController.getInstance().formatterYearMax.format(minDate), minDate, maxDate));
+                dates.add(new DateData(LocaleController.getInstance().getFormatterYearMax().format(minDate), minDate, maxDate));
                 return;
             }
 
@@ -462,7 +459,7 @@ public class FiltersView extends RecyclerListView {
                     }
                     calendar.add(Calendar.MONTH, 1);
                     long maxDate = calendar.getTimeInMillis() - 1;
-                    dates.add(new DateData(LocaleController.getInstance().formatterMonthYear.format(minDate), minDate, maxDate));
+                    dates.add(new DateData(LocaleController.getInstance().getFormatterMonthYear().format(minDate), minDate, maxDate));
                 }
             }
         }
@@ -480,7 +477,7 @@ public class FiltersView extends RecyclerListView {
             }
             calendar.add(Calendar.MONTH, 1);
             long maxDate = calendar.getTimeInMillis() - 1;
-            dates.add(new DateData(LocaleController.getInstance().formatterMonthYear.format(minDate), minDate, maxDate));
+            dates.add(new DateData(LocaleController.getInstance().getFormatterMonthYear().format(minDate), minDate, maxDate));
         }
     }
 
@@ -502,9 +499,9 @@ public class FiltersView extends RecyclerListView {
                 calendar.set(i, month, day + 2, 0, 0, 0);
                 long maxDate = calendar.getTimeInMillis() - 1;
                 if (i == currentYear) {
-                    dates.add(new DateData(LocaleController.getInstance().formatterDayMonth.format(minDate), minDate, maxDate));
+                    dates.add(new DateData(LocaleController.getInstance().getFormatterDayMonth().format(minDate), minDate, maxDate));
                 } else {
-                    dates.add(new DateData(LocaleController.getInstance().formatterYearMax.format(minDate), minDate, maxDate));
+                    dates.add(new DateData(LocaleController.getInstance().getFormatterYearMax().format(minDate), minDate, maxDate));
                 }
             }
         }
@@ -527,7 +524,7 @@ public class FiltersView extends RecyclerListView {
         SimpleDateFormat dateFormat = new SimpleDateFormat("EEEE", Locale.ENGLISH);
         for (int i = 0; i < 7; i++) {
             c.set(Calendar.DAY_OF_WEEK, i);
-            if (LocaleController.getInstance().formatterWeekLong.format(c.getTime()).toLowerCase().startsWith(q)) {
+            if (LocaleController.getInstance().getFormatterWeekLong().format(c.getTime()).toLowerCase().startsWith(q)) {
                 return i;
             }
             if (dateFormat.format(c.getTime()).toLowerCase().startsWith(q)) {
@@ -539,18 +536,18 @@ public class FiltersView extends RecyclerListView {
 
     public static int getMonth(String q) {
         String[] months = new String[]{
-                LocaleController.getString("January", R.string.January).toLowerCase(),
-                LocaleController.getString("February", R.string.February).toLowerCase(),
-                LocaleController.getString("March", R.string.March).toLowerCase(),
-                LocaleController.getString("April", R.string.April).toLowerCase(),
-                LocaleController.getString("May", R.string.May).toLowerCase(),
-                LocaleController.getString("June", R.string.June).toLowerCase(),
-                LocaleController.getString("July", R.string.July).toLowerCase(),
-                LocaleController.getString("August", R.string.August).toLowerCase(),
-                LocaleController.getString("September", R.string.September).toLowerCase(),
-                LocaleController.getString("October", R.string.October).toLowerCase(),
-                LocaleController.getString("November", R.string.November).toLowerCase(),
-                LocaleController.getString("December", R.string.December).toLowerCase()
+                LocaleController.getString(R.string.January).toLowerCase(),
+                LocaleController.getString(R.string.February).toLowerCase(),
+                LocaleController.getString(R.string.March).toLowerCase(),
+                LocaleController.getString(R.string.April).toLowerCase(),
+                LocaleController.getString(R.string.May).toLowerCase(),
+                LocaleController.getString(R.string.June).toLowerCase(),
+                LocaleController.getString(R.string.July).toLowerCase(),
+                LocaleController.getString(R.string.August).toLowerCase(),
+                LocaleController.getString(R.string.September).toLowerCase(),
+                LocaleController.getString(R.string.October).toLowerCase(),
+                LocaleController.getString(R.string.November).toLowerCase(),
+                LocaleController.getString(R.string.December).toLowerCase()
         };
 
         String[] monthsEng = new String[12];
@@ -596,22 +593,19 @@ public class FiltersView extends RecyclerListView {
         return false;
     }
 
+    public boolean drawDivider = true;
+
     @Override
     public void onDraw(Canvas c) {
         super.onDraw(c);
-        c.drawRect(0, getMeasuredHeight() - 1, getMeasuredWidth(), getMeasuredHeight(), Theme.dividerPaint);
+        if (drawDivider) {
+            c.drawRect(0, getMeasuredHeight() - 1, getMeasuredWidth(), getMeasuredHeight(), Theme.dividerPaint);
+        }
     }
 
+    @Override
     public void updateColors() {
-        getRecycledViewPool().clear();
-
-        for (int i = 0; i < getChildCount(); i++) {
-            View view = getChildAt(i);
-            if (view instanceof FilterView) {
-                ((FilterView) view).updateColors();
-            }
-        }
-
+        // pooled FilterViews are Theme.Colorable and are recolored by the theme dispatcher (no pool clear on every frame)
         for (int i = 0; i < getCachedChildCount(); i++) {
             View view = getCachedChildAt(i);
             if (view instanceof FilterView) {
@@ -625,7 +619,7 @@ public class FiltersView extends RecyclerListView {
                 ((FilterView) view).updateColors();
             }
         }
-        setSelectorDrawableColor(getThemedColor(Theme.key_listSelector));
+        // list selector: bound in the constructor (ThemeBind.listSelectorColor), recreating it here would allocate every frame
     }
 
     private class Adapter extends RecyclerListView.SelectionAdapter {
@@ -634,8 +628,7 @@ public class FiltersView extends RecyclerListView {
         @Override
         public ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
             ViewHolder holder = new ViewHolder(new FilterView(parent.getContext(), resourcesProvider));
-            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, AndroidUtilities.dp(32));
-            lp.topMargin = AndroidUtilities.dp(6);
+            RecyclerView.LayoutParams lp = new RecyclerView.LayoutParams(ViewGroup.LayoutParams.WRAP_CONTENT, AndroidUtilities.dp(30));
             holder.itemView.setLayoutParams(lp);
             return holder;
         }
@@ -696,7 +689,7 @@ public class FiltersView extends RecyclerListView {
         }
     };
 
-    public static class FilterView extends FrameLayout {
+    public static class FilterView extends FrameLayout implements Theme.Colorable {
 
         private final Theme.ResourcesProvider resourcesProvider;
 
@@ -709,24 +702,32 @@ public class FiltersView extends RecyclerListView {
             super(context);
             this.resourcesProvider = resourcesProvider;
             avatarImageView = new BackupImageView(context);
-            addView(avatarImageView, LayoutHelper.createFrame(32, 32));
+            addView(avatarImageView, LayoutHelper.createFrame(30, 30));
 
             titleView = new TextView(context);
             titleView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-            addView(titleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 38, 0, 16, 0));
+            addView(titleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL, 36, 0, 14, 0));
             updateColors();
         }
 
-        private void updateColors() {
-            setBackground(Theme.createRoundRectDrawable(AndroidUtilities.dp(28), getThemedColor(Theme.key_groupcreate_spanBackground)));
-            titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-            if (thumbDrawable != null) {
+        @Override
+        public void updateColors() {
+            if (getBackground() instanceof ShapeDrawable) {
+                Theme.setDrawableColor(getBackground(), getThemedColor(Theme.key_groupcreate_spanBackground));
+                invalidate();
+            } else {
+                setBackground(Theme.createRoundRectDrawable(AndroidUtilities.dp(28), getThemedColor(Theme.key_groupcreate_spanBackground)));
+            }
+            if (titleView != null) {
+                titleView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+            }
+            if (thumbDrawable != null && data != null) {
                 if (data.filterType == FILTER_TYPE_ARCHIVE) {
-                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_backgroundArchived), false);
-                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_actionBarIconBlue), true);
+                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_addButton), false);
+                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_buttonText), true);
                 } else {
-                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_backgroundBlue), false);
-                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_actionBarIconBlue), true);
+                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_addButton), false);
+                    Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_buttonText), true);
                 }
             }
         }
@@ -737,23 +738,23 @@ public class FiltersView extends RecyclerListView {
             if (data.filterType == FILTER_TYPE_ARCHIVE) {
                 thumbDrawable = Theme.createCircleDrawableWithIcon(AndroidUtilities.dp(32), R.drawable.chats_archive);
                 thumbDrawable.setIconSize(AndroidUtilities.dp(16), AndroidUtilities.dp(16));
-                Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_backgroundArchived), false);
-                Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_actionBarIconBlue), true);
+                Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_addButton), false);
+                Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_buttonText), true);
                 avatarImageView.setImageDrawable(thumbDrawable);
                 titleView.setText(data.title);
                 return;
             }
             thumbDrawable = Theme.createCircleDrawableWithIcon(AndroidUtilities.dp(32), data.iconResFilled);
-            Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_backgroundBlue), false);
-            Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_avatar_actionBarIconBlue), true);
+            Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_addButton), false);
+            Theme.setCombinedDrawableColor(thumbDrawable, getThemedColor(Theme.key_featuredStickers_buttonText), true);
             if (data.filterType == FILTER_TYPE_CHAT) {
                 if (data.chat instanceof TLRPC.User) {
                     TLRPC.User user = (TLRPC.User) data.chat;
                     if (UserConfig.getInstance(UserConfig.selectedAccount).getCurrentUser().id == user.id) {
                         CombinedDrawable combinedDrawable = Theme.createCircleDrawableWithIcon(AndroidUtilities.dp(32), R.drawable.chats_saved);
                         combinedDrawable.setIconSize(AndroidUtilities.dp(16), AndroidUtilities.dp(16));
-                        Theme.setCombinedDrawableColor(combinedDrawable, getThemedColor(Theme.key_avatar_backgroundSaved), false);
-                        Theme.setCombinedDrawableColor(combinedDrawable, getThemedColor(Theme.key_avatar_actionBarIconBlue), true);
+                        Theme.setCombinedDrawableColor(combinedDrawable, getThemedColor(Theme.key_featuredStickers_addButton), false);
+                        Theme.setCombinedDrawableColor(combinedDrawable, getThemedColor(Theme.key_featuredStickers_buttonText), true);
                         avatarImageView.setImageDrawable(combinedDrawable);
                     } else {
                         avatarImageView.getImageReceiver().setRoundRadius(AndroidUtilities.dp(16));
@@ -761,7 +762,7 @@ public class FiltersView extends RecyclerListView {
                     }
                 } else if (data.chat instanceof TLRPC.Chat) {
                     TLRPC.Chat chat = (TLRPC.Chat) data.chat;
-                    avatarImageView.getImageReceiver().setRoundRadius(AndroidUtilities.dp(16));
+                    avatarImageView.getImageReceiver().setRoundRadius(AndroidUtilities.dp(ChatObject.isCommunity(chat) ? 10 : 16));
                     avatarImageView.getImageReceiver().setForUserOrChat(chat, thumbDrawable);
                 }
             } else {

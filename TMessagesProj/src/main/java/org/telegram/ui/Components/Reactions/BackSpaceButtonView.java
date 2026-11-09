@@ -19,6 +19,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Stories.RoundRectOutlineProvider;
@@ -55,7 +56,9 @@ public class BackSpaceButtonView extends FrameLayout {
                     if (!backspaceOnce) {
                         if (onBackspace != null) {
                             onBackspace.run(false);
-                            backspaceButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                            try {
+                                backspaceButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                            } catch (Exception ignored) {}
                         }
                     }
                 }
@@ -65,9 +68,9 @@ public class BackSpaceButtonView extends FrameLayout {
         };
         backspaceButton.setHapticFeedbackEnabled(true);
         backspaceButton.setImageResource(R.drawable.smiles_tab_clear);
-        backspaceButton.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_emojiPanelBackspace), PorterDuff.Mode.MULTIPLY));
+        ThemeBind.colorFilter(backspaceButton, Theme.key_chat_emojiPanelBackspace, resourcesProvider, PorterDuff.Mode.MULTIPLY);
         backspaceButton.setScaleType(ImageView.ScaleType.CENTER);
-        backspaceButton.setContentDescription(LocaleController.getString("AccDescrBackspace", R.string.AccDescrBackspace));
+        backspaceButton.setContentDescription(LocaleController.getString(R.string.AccDescrBackspace));
         backspaceButton.setFocusable(true);
         backspaceButton.setOnClickListener(v -> {
 
@@ -77,7 +80,7 @@ public class BackSpaceButtonView extends FrameLayout {
         int rippleColor = Theme.getColor(Theme.key_listSelector);
         Drawable drawable = Theme.createSimpleSelectorCircleDrawable(AndroidUtilities.dp(36), getThemedColor(Theme.key_windowBackgroundWhite), rippleColor);
         if (Build.VERSION.SDK_INT >= 21) {
-            backspaceButton.setBackground(drawable);
+            ThemeBind.selectorBackground(backspaceButton, drawable, ThemeBind.of(Theme.key_windowBackgroundWhite), null, resourcesProvider);
             backspaceButton.setOutlineProvider(new RoundRectOutlineProvider(18));
             backspaceButton.setElevation(AndroidUtilities.dp(1));
             backspaceButton.setClipToOutline(true);
@@ -112,7 +115,9 @@ public class BackSpaceButtonView extends FrameLayout {
             }
             if (onBackspace != null) {
                 onBackspace.run(time < 300);
-                backspaceButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                try {
+                    backspaceButton.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                } catch (Exception ignored) {}
             }
             backspaceOnce = true;
             postBackspaceRunnable(Math.max(50, time - 100));

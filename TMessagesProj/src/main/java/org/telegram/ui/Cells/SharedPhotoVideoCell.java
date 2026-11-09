@@ -8,6 +8,7 @@
 
 package org.telegram.ui.Cells;
 
+import org.telegram.messenger.FileLog;
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.AnimatorSet;
@@ -30,7 +31,6 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DownloadController;
 import org.telegram.messenger.ImageLocation;
-import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.ApplicationLoader;
@@ -40,12 +40,13 @@ import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.CheckBox2;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.PhotoViewer;
 
-public class SharedPhotoVideoCell extends FrameLayout {
+public class SharedPhotoVideoCell extends FrameLayout implements Theme.Colorable {
 
     private PhotoVideoView[] photoVideoViews;
     private MessageObject[] messageObjects;
@@ -118,7 +119,7 @@ public class SharedPhotoVideoCell extends FrameLayout {
 
             videoTextView = new TextView(context);
             videoTextView.setTextColor(0xffffffff);
-            videoTextView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+            videoTextView.setTypeface(AndroidUtilities.bold());
             videoTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
             videoTextView.setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_NO);
             videoInfoContainer.addView(videoTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.CENTER_VERTICAL, 13, -0.7f, 0, 0));
@@ -183,7 +184,7 @@ public class SharedPhotoVideoCell extends FrameLayout {
         public void setMessageObject(MessageObject messageObject) {
             currentMessageObject = messageObject;
             imageView.getImageReceiver().setVisible(!PhotoViewer.isShowingImage(messageObject), false);
-            String restrictionReason = MessagesController.getRestrictionReason(messageObject.messageOwner.restriction_reason);
+            String restrictionReason = MessagesController.getInstance(currentAccount).getRestrictionReason(messageObject.messageOwner.restriction_reason);
             if (!TextUtils.isEmpty(restrictionReason)) {
                 videoInfoContainer.setVisibility(INVISIBLE);
                 imageView.setImageResource(R.drawable.photo_placeholder_in);
@@ -250,10 +251,12 @@ public class SharedPhotoVideoCell extends FrameLayout {
         @Override
         public void onInitializeAccessibilityNodeInfo(AccessibilityNodeInfo info) {
             super.onInitializeAccessibilityNodeInfo(info);
-            if (currentMessageObject.isVideo()) {
-                info.setText(LocaleController.getString("AttachVideo", R.string.AttachVideo) + ", " + LocaleController.formatDuration((int) currentMessageObject.getDuration()));
+            if (currentMessageObject.isLivePhoto()) {
+                info.setText(LocaleController.getString(R.string.AttachLivePhoto));
+            } else if (currentMessageObject.isVideo()) {
+                info.setText(LocaleController.getString(R.string.AttachVideo) + ", " + LocaleController.formatDuration((int) currentMessageObject.getDuration()));
             } else {
-                info.setText(LocaleController.getString("AttachPhoto", R.string.AttachPhoto));
+                info.setText(LocaleController.getString(R.string.AttachPhoto));
             }
             if (checkBox.isChecked()) {
                 info.setCheckable(true);
@@ -428,5 +431,16 @@ public class SharedPhotoVideoCell extends FrameLayout {
             itemWidth = (AndroidUtilities.displaySize.x - (itemsCount - 1) * AndroidUtilities.dp(2)) / itemsCount;
         }
         return itemWidth;
+    }
+
+    @Override
+    public void updateColors() {
+        try {
+            backgroundPaint.setColor(Theme.getColor(Theme.key_sharedMedia_photoPlaceholder));
+            invalidate();
+    
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 }

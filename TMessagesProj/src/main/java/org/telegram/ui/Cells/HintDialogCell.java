@@ -10,6 +10,7 @@ package org.telegram.ui.Cells;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
+import org.telegram.messenger.FileLog;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Color;
@@ -34,7 +35,9 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
@@ -44,7 +47,7 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.Premium.PremiumGradient;
 
-public class HintDialogCell extends FrameLayout {
+public class HintDialogCell extends FrameLayout implements Theme.Colorable {
 
     private BackupImageView imageView;
     private TextView nameTextView;
@@ -64,9 +67,11 @@ public class HintDialogCell extends FrameLayout {
     CheckBox2 checkBox;
     private final boolean drawCheckbox;
 
-    private final AnimatedFloat premiumBlockedT = new AnimatedFloat(this, 0, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
     private boolean showPremiumBlocked;
+    private final AnimatedFloat premiumBlockedT = new AnimatedFloat(this, 0, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
     private boolean premiumBlocked;
+    private final AnimatedFloat starsBlockedT = new AnimatedFloat(this, 0, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
+    private long starsPriceBlocked;
 
     public boolean isBlocked() {
         return premiumBlocked;
@@ -83,12 +88,12 @@ public class HintDialogCell extends FrameLayout {
         nameTextView = new TextView(context) {
             @Override
             public void setText(CharSequence text, BufferType type) {
-                text = Emoji.replaceEmoji(text, getPaint().getFontMetricsInt(), AndroidUtilities.dp(10), false);
+                text = Emoji.replaceEmoji(text, getPaint().getFontMetricsInt(), false);
                 super.setText(text, type);
             }
         };
         NotificationCenter.listenEmojiLoading(nameTextView);
-        nameTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
+        ThemeBind.textColor(nameTextView, Theme.key_windowBackgroundWhiteBlackText, resourcesProvider);
         nameTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
         nameTextView.setMaxLines(1);
         nameTextView.setGravity(Gravity.TOP | Gravity.CENTER_HORIZONTAL);
@@ -127,11 +132,13 @@ public class HintDialogCell extends FrameLayout {
     }
 
     private void updatePremiumBlocked(boolean animated) {
-        final boolean wasPremiumBlocked =premiumBlocked;
-        premiumBlocked = showPremiumBlocked && currentUser != null && MessagesController.getInstance(currentAccount).isUserPremiumBlocked(currentUser.id);
-        if (wasPremiumBlocked != premiumBlocked) {
+        final TL_account.RequirementToContact r = showPremiumBlocked && currentUser != null ? MessagesController.getInstance(currentAccount).isUserContactBlocked(currentUser.id) : null;
+        if (premiumBlocked != DialogObject.isPremiumBlocked(r) || starsPriceBlocked != DialogObject.getMessagesStarsPrice(r)) {
+            premiumBlocked = DialogObject.isPremiumBlocked(r);
+            starsPriceBlocked = DialogObject.getMessagesStarsPrice(r);
             if (!animated) {
                 premiumBlockedT.set(premiumBlocked, true);
+                starsBlockedT.set(starsPriceBlocked > 0, true);
             }
             invalidate();
         }
@@ -179,7 +186,7 @@ public class HintDialogCell extends FrameLayout {
     }
 
     public void setColors(int textColorKey, int backgroundColorKey) {
-        nameTextView.setTextColor(Theme.getColor(textColorKey, resourcesProvider));
+        ThemeBind.textColor(nameTextView, textColorKey, resourcesProvider);
         this.backgroundColorKey = backgroundColorKey;
         checkBox.setColor(Theme.key_dialogRoundCheckBox, backgroundColorKey, Theme.key_dialogRoundCheckBoxCheck);
     }
@@ -308,5 +315,18 @@ public class HintDialogCell extends FrameLayout {
 
     public long getDialogId() {
         return dialogId;
+    }
+
+    @Override
+    public void updateColors() {
+        try {
+            // counter / avatar colors are read at draw: no update(0) (a counter text rebuild per theme frame)
+            if (counterView != null) {
+                counterView.invalidate();
+            }
+            invalidate();
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 }

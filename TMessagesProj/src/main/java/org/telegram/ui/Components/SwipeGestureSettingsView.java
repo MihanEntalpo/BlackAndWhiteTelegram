@@ -22,8 +22,11 @@ import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 
-public class SwipeGestureSettingsView extends FrameLayout {
+public class SwipeGestureSettingsView extends FrameLayout implements Theme.Colorable {
+
+    private int pickerTextColor;
 
     public static final int SWIPE_GESTURE_PIN = 0;
     public static final int SWIPE_GESTURE_READ = 1;
@@ -44,6 +47,9 @@ public class SwipeGestureSettingsView extends FrameLayout {
     String[] strings = new String[6];
     int[] backgroundKeys = new int[6];
     RLottieDrawable[] icons = new RLottieDrawable[6];
+    private final RLottieDrawable[] lastIconDrawables = new RLottieDrawable[6];
+    private final int[] lastIconColors = new int[6];
+    private final int[] lastIconBackgroundColors = new int[6];
 
     int currentIconIndex;
     RLottieImageView[] iconViews = new RLottieImageView[2];
@@ -58,12 +64,12 @@ public class SwipeGestureSettingsView extends FrameLayout {
     public SwipeGestureSettingsView(Context context, int currentAccount) {
         super(context);
 
-        strings[SWIPE_GESTURE_PIN] = LocaleController.getString("SwipeSettingsPin", R.string.SwipeSettingsPin);
-        strings[SWIPE_GESTURE_READ] = LocaleController.getString("SwipeSettingsRead", R.string.SwipeSettingsRead);
-        strings[SWIPE_GESTURE_ARCHIVE] = LocaleController.getString("SwipeSettingsArchive", R.string.SwipeSettingsArchive);
-        strings[SWIPE_GESTURE_MUTE] = LocaleController.getString("SwipeSettingsMute", R.string.SwipeSettingsMute);
-        strings[SWIPE_GESTURE_DELETE] = LocaleController.getString("SwipeSettingsDelete", R.string.SwipeSettingsDelete);
-        strings[SWIPE_GESTURE_FOLDERS] = LocaleController.getString("SwipeSettingsFolders", R.string.SwipeSettingsFolders);
+        strings[SWIPE_GESTURE_PIN] = LocaleController.getString(R.string.SwipeSettingsPin);
+        strings[SWIPE_GESTURE_READ] = LocaleController.getString(R.string.SwipeSettingsRead);
+        strings[SWIPE_GESTURE_ARCHIVE] = LocaleController.getString(R.string.SwipeSettingsArchive);
+        strings[SWIPE_GESTURE_MUTE] = LocaleController.getString(R.string.SwipeSettingsMute);
+        strings[SWIPE_GESTURE_DELETE] = LocaleController.getString(R.string.SwipeSettingsDelete);
+        strings[SWIPE_GESTURE_FOLDERS] = LocaleController.getString(R.string.SwipeSettingsFolders);
 
         backgroundKeys[SWIPE_GESTURE_PIN] = Theme.key_chats_archiveBackground;
         backgroundKeys[SWIPE_GESTURE_READ] = Theme.key_chats_archiveBackground;
@@ -86,6 +92,11 @@ public class SwipeGestureSettingsView extends FrameLayout {
         picker = new NumberPicker(context, 13) {
             @Override
             protected void onDraw(Canvas canvas) {
+                final int textColor = Theme.getColor(Theme.key_dialogTextBlack);
+                if (textColor != pickerTextColor) {
+                    pickerTextColor = textColor;
+                    setTextColor(textColor);
+                }
                 super.onDraw(canvas);
                 float y = AndroidUtilities.dp(31);
                 pickerDividersPaint.setColor(Theme.getColor(Theme.key_radioBackgroundChecked));
@@ -95,6 +106,7 @@ public class SwipeGestureSettingsView extends FrameLayout {
                 canvas.drawLine(AndroidUtilities.dp(2), y, getMeasuredWidth() - AndroidUtilities.dp(2), y, pickerDividersPaint);
             }
         };
+        pickerTextColor = Theme.getColor(Theme.key_dialogTextBlack);
         picker.setMinValue(0);
         picker.setDrawDividers(false);
         hasTabs = !MessagesController.getInstance(currentAccount).dialogFilters.isEmpty();
@@ -107,7 +119,9 @@ public class SwipeGestureSettingsView extends FrameLayout {
 
             SharedConfig.updateChatListSwipeSetting(newVal);
             invalidate();
-            picker.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+            try {
+                picker.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+            } catch (Exception ignored) {}
         });
         picker.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO);
         picker.setValue(SharedConfig.getChatSwipeAction(currentAccount));
@@ -298,7 +312,7 @@ public class SwipeGestureSettingsView extends FrameLayout {
                     rawId = R.raw.swipe_disabled;
                     break;
             }
-            icons[i] = new RLottieDrawable(rawId, "" + rawId, AndroidUtilities.dp(28), AndroidUtilities.dp(28), true, null);
+            icons[i] = new RLottieDrawable(rawId, AndroidUtilities.dp(28), AndroidUtilities.dp(28), true, null);
             updateIconColor(i);
         }
 
@@ -309,16 +323,24 @@ public class SwipeGestureSettingsView extends FrameLayout {
         if (icons[i] != null) {
             int backgroundColor = ColorUtils.blendARGB(Theme.getColor(Theme.key_windowBackgroundWhite), Theme.getColor(Theme.key_chats_archiveBackground), 0.9f);//Theme.getColor(Theme.key_chats_archiveBackground);
             int iconColor = Theme.getColor(Theme.key_chats_archiveIcon);
+            // runs on every theme frame (updateColors): only recolor when a color changed
+            if (icons[i] == lastIconDrawables[i] && iconColor == lastIconColors[i] && backgroundColor == lastIconBackgroundColors[i]) {
+                return;
+            }
+            lastIconDrawables[i] = icons[i];
+            lastIconColors[i] = iconColor;
+            lastIconBackgroundColors[i] = backgroundColor;
             if (i == SWIPE_GESTURE_ARCHIVE) {
-                icons[i].setLayerColor("Arrow.**", backgroundColor);
-                icons[i].setLayerColor("Box2.**",iconColor);
-                icons[i].setLayerColor("Box1.**",iconColor);
+                icons[i].setLayerColor("Arrow", backgroundColor);
+                icons[i].setLayerColor("Box2",iconColor);
+                icons[i].setLayerColor("Box1",iconColor);
             } else {
-                icons[i].setColorFilter(new PorterDuffColorFilter(iconColor, PorterDuff.Mode.MULTIPLY));
+                ThemeBind.drawableColorFilter(this, icons[i], Theme.key_chats_archiveIcon, PorterDuff.Mode.SRC_IN);
             }
         }
     }
 
+    @Override
     public void updateColors() {
         for(int i = 0; i < icons.length; i++) {
             updateIconColor(i);
@@ -329,7 +351,7 @@ public class SwipeGestureSettingsView extends FrameLayout {
     public void setBackgroundColor(int color) {
         super.setBackgroundColor(color);
         updateColors();
-        picker.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        picker.setTextColor(pickerTextColor = Theme.getColor(Theme.key_dialogTextBlack));
         picker.invalidate();
     }
 

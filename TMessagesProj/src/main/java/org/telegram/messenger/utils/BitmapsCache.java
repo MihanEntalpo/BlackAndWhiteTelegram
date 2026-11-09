@@ -27,6 +27,7 @@ import java.util.concurrent.LinkedBlockingQueue;
 import java.util.concurrent.ThreadPoolExecutor;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 public class BitmapsCache {
 
@@ -38,11 +39,12 @@ public class BitmapsCache {
     String fileName;
     int w;
     int h;
+    public final AtomicInteger framesProcessed = new AtomicInteger(0);
 
     ArrayList<FrameOffset> frameOffsets = new ArrayList<>();
 
     final boolean useSharedBuffers;
-    static ConcurrentHashMap<Thread, byte[]> sharedBuffers = new ConcurrentHashMap();
+    final static ConcurrentHashMap<Thread, byte[]> sharedBuffers = new ConcurrentHashMap<>();
     static volatile boolean cleanupScheduled;
     byte[] bufferTmp;
 
@@ -76,6 +78,10 @@ public class BitmapsCache {
     };
 
     public BitmapsCache(File sourceFile, Cacheable source, CacheOptions options, int w, int h, boolean noLimit) {
+        this(sourceFile, source, options, w, h, noLimit, 0);
+    }
+
+    public BitmapsCache(File sourceFile, Cacheable source, CacheOptions options, int w, int h, boolean noLimit, int fitz) {
         this.source = source;
         this.w = w;
         this.h = h;
@@ -90,7 +96,7 @@ public class BitmapsCache {
             fileTmo.mkdir();
             mkdir = true;
         }
-        file = new File(fileTmo, fileName + "_" + w + "_" + h + (noLimit ? "_nolimit" : " ") + ".pcache2");
+        file = new File(fileTmo, fileName + "_" + w + "_" + h + (noLimit ? "_nolimit" : " ") + (fitz != 0 ? "_fitz" + fitz : "") + ".pcache2");
         useSharedBuffers = w < AndroidUtilities.dp(60) && h < AndroidUtilities.dp(60);
 
         // check cache created in file load queue only for high devices
@@ -111,6 +117,7 @@ public class BitmapsCache {
                         if (frameOffsets.size() == 0) {
                             cacheCreated = false;
                             fileExist = false;
+                            checked = true;
                             file.delete();
                         } else {
                             if (cachedFile != randomAccessFile) {
@@ -123,6 +130,7 @@ public class BitmapsCache {
                     e.printStackTrace();
                     file.delete();
                     fileExist = false;
+                    checked = true;
                 } finally {
                     try {
                         if (cachedFile != randomAccessFile && randomAccessFile != null) {
@@ -133,12 +141,14 @@ public class BitmapsCache {
                     }
                 }
             }
+            checked = true;
         } else {
             fileExist = false;
             cacheCreated = false;
         }
     }
 
+    public volatile boolean checked;
     volatile boolean checkCache;
     volatile boolean cacheCreated;
     volatile boolean recycled;
@@ -189,10 +199,12 @@ public class BitmapsCache {
                             }
                             cachedFile = randomAccessFile;
                             fileExist = true;
+                            checked = true;
                             return;
                         } else {
                             fileExist = false;
                             cacheCreated = false;
+                            checked = true;
                         }
                     }
                     if (!cacheCreated) {
@@ -272,7 +284,13 @@ public class BitmapsCache {
                     return;
                 }
 
-                if (source.getNextFrame(bitmap[index]) != 1) {
+                int frameResult = source.getNextFrame(bitmap[index]);
+                if (frameResult == -1) {
+                    // render failed: abort without marking the cache as complete
+                    closed.set(true);
+                    continue;
+                }
+                if (frameResult != 1) {
                     break;
                 }
                 countDownLatch[index] = new CountDownLatch(1);
@@ -322,6 +340,7 @@ public class BitmapsCache {
                 if (index >= N) {
                     index = 0;
                 }
+                framesProcessed.set(framePosition);
             }
             for (int i = 0; i < N; i++) {
                 if (countDownLatch[i] != null) {
@@ -357,6 +376,7 @@ public class BitmapsCache {
             cachedFile = new RandomAccessFile(file, "r");
             cacheCreated = true;
             fileExist = true;
+            checked = true;
         } catch (FileNotFoundException e) {
             e.printStackTrace();
         } catch (IOException e) {
@@ -411,6 +431,7 @@ public class BitmapsCache {
                 framesCount = randomAccessFile.readInt();
                 if (framesCount <= 0) {
                     cacheCreated = false;
+                    checked = true;
                 }
             }
         } catch (Exception e) {
@@ -427,6 +448,8 @@ public class BitmapsCache {
         checkCache = true;
         return cacheCreated;
     }
+
+    private Bitmap tmpRgbaBitmap;
 
     public int getFrame(int index, Bitmap bitmap) {
         if (error) {
@@ -449,6 +472,7 @@ public class BitmapsCache {
                 }
                 if (frameOffsets.size() == 0) {
                     cacheCreated = false;
+                    checked = true;
                 }
 
                 if (!cacheCreated) {
@@ -481,8 +505,20 @@ public class BitmapsCache {
             if (options == null) {
                 options = new BitmapFactory.Options();
             }
-            options.inBitmap = bitmap;
+
+            final boolean singleChannel = bitmap.getConfig() == Bitmap.Config.ALPHA_8;
+            if (singleChannel) {
+                if (tmpRgbaBitmap == null || tmpRgbaBitmap.getWidth() != bitmap.getWidth() || tmpRgbaBitmap.getHeight() != bitmap.getHeight()) {
+                    tmpRgbaBitmap = Bitmap.createBitmap(bitmap.getWidth(), bitmap.getHeight(), Bitmap.Config.ARGB_8888);
+                }
+                options.inBitmap = tmpRgbaBitmap;
+            } else {
+                options.inBitmap = bitmap;
+            }
             BitmapFactory.decodeByteArray(bufferTmp, 0, selectedFrame.frameSize, options);
+            if (singleChannel) {
+                Utilities.extractAlpha(tmpRgbaBitmap, bitmap);
+            }
             options.inBitmap = null;
             return FRAME_RESULT_OK;
         } catch (FileNotFoundException e) {
@@ -581,8 +617,6 @@ public class BitmapsCache {
         int getNextFrame(Bitmap bitmap);
 
         void releaseForGenerateCache();
-
-        Bitmap getFirstFrame(Bitmap bitmap);
     }
 
     public static class Metadata {

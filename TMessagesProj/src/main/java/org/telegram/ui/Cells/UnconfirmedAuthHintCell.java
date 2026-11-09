@@ -2,6 +2,7 @@ package org.telegram.ui.Cells;
 
 import static org.telegram.messenger.AndroidUtilities.REPLACING_TAG_TYPE_LINK;
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 
 import android.content.Context;
 import android.graphics.Canvas;
@@ -9,13 +10,10 @@ import android.graphics.Color;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.RippleDrawable;
-import android.os.Build;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -29,6 +27,7 @@ import androidx.annotation.NonNull;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BotWebViewVibrationEffect;
+import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
@@ -36,15 +35,14 @@ import org.telegram.messenger.UnconfirmedAuthController;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AnimatedFloat;
-import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.CircularProgressDrawable;
 import org.telegram.ui.Components.ColoredImageSpan;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
-import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.RLottieImageView;
 import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.LaunchActivity;
@@ -53,7 +51,7 @@ import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 
 import java.util.ArrayList;
 
-public class UnconfirmedAuthHintCell extends FrameLayout {
+public class UnconfirmedAuthHintCell extends FrameLayout implements Theme.Colorable {
 
     private final LinearLayout linearLayout;
     private final TextView titleTextView;
@@ -74,14 +72,15 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
         titleTextView = new TextView(context);
         titleTextView.setGravity(Gravity.CENTER);
         titleTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-        titleTextView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        titleTextView.setTypeface(AndroidUtilities.bold());
         titleTextView.setText(LocaleController.getString(R.string.UnconfirmedAuthTitle));
-        linearLayout.addView(titleTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.TOP | Gravity.FILL_HORIZONTAL, 28,  11, 28, 0));
+        linearLayout.addView(titleTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.TOP | Gravity.FILL_HORIZONTAL, 28,  8, 28, 0));
 
         messageTextView = new TextView(context);
         messageTextView.setGravity(Gravity.CENTER);
         messageTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        linearLayout.addView(messageTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.TOP | Gravity.FILL_HORIZONTAL, 28,  5, 28, 0));
+        messageTextView.setLineSpacing(dpf2(2), 1);
+        linearLayout.addView(messageTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, Gravity.TOP | Gravity.FILL_HORIZONTAL, 28,  2, 28, 0));
 
         buttonsLayout = new LinearLayout(context);
         buttonsLayout.setOrientation(LinearLayout.HORIZONTAL);
@@ -91,7 +90,7 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
 
         yesButton = new TextViewWithLoading(context);
         yesButton.setPadding(dp(10), dp(5), dp(10), dp(7));
-        yesButton.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        yesButton.setTypeface(AndroidUtilities.bold());
         yesButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14.22f);
         yesButton.setText(LocaleController.getString(R.string.UnconfirmedAuthConfirm));
         buttonsLayout.addView(yesButton, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 30));
@@ -100,14 +99,14 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
 
         noButton = new TextViewWithLoading(context);
         noButton.setPadding(dp(10), dp(5), dp(10), dp(7));
-        noButton.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        noButton.setTypeface(AndroidUtilities.bold());
         noButton.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14.22f);
         noButton.setText(LocaleController.getString(R.string.UnconfirmedAuthDeny));
         buttonsLayout.addView(noButton, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 30));
 
         buttonsLayout.addView(new Space(context), LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, 1, Gravity.CENTER, 1));
 
-        linearLayout.addView(buttonsLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 28, 7, 28, 8));
+        linearLayout.addView(buttonsLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 28, 4, 28, 8));
 
         addView(linearLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
 
@@ -117,21 +116,31 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
     public void set(final BaseFragment fragment, int currentAccount) {
         final ArrayList<UnconfirmedAuthController.UnconfirmedAuth> auths = MessagesController.getInstance(currentAccount).getUnconfirmedAuthController().auths;
 
-        titleTextView.setText(LocaleController.getString(R.string.UnconfirmedAuthTitle));
         yesButton.setText(LocaleController.getString(R.string.UnconfirmedAuthConfirm));
         yesButton.setLoading(false, false);
         noButton.setText(LocaleController.getString(R.string.UnconfirmedAuthDeny));
         noButton.setLoading(false, false);
 
+        boolean _bot = false;
         if (auths != null && auths.size() == 1) {
+            final UnconfirmedAuthController.UnconfirmedAuth auth = auths.get(0);
+            titleTextView.setText(LocaleController.getString(auth.bot ? R.string.UnconfirmedAuthTitleBot : R.string.UnconfirmedAuthTitle));
+
             String from = "";
-            from += auths.get(0).device;
-            if (!TextUtils.isEmpty(auths.get(0).location) && !from.isEmpty()) {
+            from += auth.device;
+            if (!TextUtils.isEmpty(auth.location) && !from.isEmpty()) {
                 from += ", ";
             }
-            from += auths.get(0).location;
-            messageTextView.setText(LocaleController.formatString(R.string.UnconfirmedAuthSingle, from));
+            from += auth.location;
+            if (auth.bot) {
+                _bot = true;
+                messageTextView.setText(LocaleController.formatString(R.string.UnconfirmedAuthSingleBot, "@" + DialogObject.getShortName(auth.bot_id), from));
+            } else {
+                messageTextView.setText(LocaleController.formatString(R.string.UnconfirmedAuthSingle, from));
+            }
         } else if (auths != null && auths.size() > 1) {
+            titleTextView.setText(LocaleController.getString(R.string.UnconfirmedAuthTitle));
+
             String from = auths.get(0).location;
             for (int i = 1; i < auths.size(); ++i) {
                 if (!TextUtils.equals(from, auths.get(i).location)) {
@@ -145,6 +154,7 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
                 messageTextView.setText(LocaleController.formatPluralString("UnconfirmedAuthMultipleFrom", auths.size(), from));
             }
         }
+        final boolean bot = _bot;
 
         yesButton.setOnClickListener(v -> {
             SpannableStringBuilder message = AndroidUtilities.replaceSingleTag(LocaleController.getString(R.string.UnconfirmedAuthConfirmedMessage), Theme.key_undo_cancelColor, REPLACING_TAG_TYPE_LINK, () -> {
@@ -158,7 +168,7 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
             span.setWidth(dp(12));
             arrowStr.setSpan(span, 0, arrowStr.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
             AndroidUtilities.replaceCharSequence(">", message, arrowStr);
-            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, LocaleController.getString(R.string.UnconfirmedAuthConfirmed), message).show();
+            BulletinFactory.of(fragment).createSimpleBulletin(R.raw.contact_check, LocaleController.getString(bot ? R.string.UnconfirmedAuthConfirmedBot : R.string.UnconfirmedAuthConfirmed), message).show();
             MessagesController.getInstance(currentAccount).getUnconfirmedAuthController().confirm(auths, success -> {
 
             });
@@ -175,15 +185,37 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
         });
     }
 
+    @Override
     public void updateColors() {
-        setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        if (titleTextView == null || messageTextView == null || yesButton == null || noButton == null) {
+            return;
+        }
+        // setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
         titleTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText));
         messageTextView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
         yesButton.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteValueText));
-        yesButton.setBackground(Theme.createSelectorDrawable(Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteValueText), Theme.isCurrentThemeDark() ? .3f : .15f), Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(8)));
+        final int yesRipple = Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteValueText), Theme.isCurrentThemeDark() ? .3f : .15f);
+        if (yesButton.getBackground() != null) {
+            if (yesRipple != lastYesRipple) { // recoloring a RippleDrawable allocates a ColorStateList
+                Theme.setSelectorDrawableColor(yesButton.getBackground(), yesRipple, true);
+            }
+        } else {
+            yesButton.setBackground(Theme.createSelectorDrawable(yesRipple, Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(8)));
+        }
         noButton.setTextColor(Theme.getColor(Theme.key_text_RedBold));
-        noButton.setBackground(Theme.createSelectorDrawable(Theme.multAlpha(Theme.getColor(Theme.key_text_RedBold), Theme.isCurrentThemeDark() ? .3f : .15f), Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(8)));
+        final int noRipple = Theme.multAlpha(Theme.getColor(Theme.key_text_RedBold), Theme.isCurrentThemeDark() ? .3f : .15f);
+        if (noButton.getBackground() != null) {
+            if (noRipple != lastNoRipple) {
+                Theme.setSelectorDrawableColor(noButton.getBackground(), noRipple, true);
+            }
+        } else {
+            noButton.setBackground(Theme.createSelectorDrawable(noRipple, Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(8)));
+        }
+        lastYesRipple = yesRipple;
+        lastNoRipple = noRipple;
     }
+
+    private int lastYesRipple, lastNoRipple;
 
     private static class TextViewWithLoading extends TextView {
         public TextViewWithLoading(Context context) {
@@ -290,15 +322,15 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
         imageView.setAnimation(R.raw.ic_ban, 50, 50);
         imageView.playAnimation();
         imageView.setScaleType(ImageView.ScaleType.CENTER);
-        imageView.setBackground(Theme.createCircleDrawable(dp(80), Theme.getColor(Theme.key_windowBackgroundWhiteValueText)));
+        ThemeBind.fillBackground(imageView, Theme.createCircleDrawable(dp(80), Theme.getColor(Theme.key_windowBackgroundWhiteValueText)), ThemeBind.of(Theme.key_windowBackgroundWhiteValueText));
         linearLayout.addView(imageView, LayoutHelper.createLinear(80, 80, Gravity.CENTER, 0, 14, 0, 0));
 
         TextView headerTextView = new TextView(getContext());
-        headerTextView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        headerTextView.setTypeface(AndroidUtilities.bold());
         headerTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
         headerTextView.setGravity(Gravity.CENTER);
         headerTextView.setText(LocaleController.formatPluralString("UnconfirmedAuthDeniedTitle", auths.size()));
-        headerTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        ThemeBind.textColor(headerTextView, Theme.key_dialogTextBlack);
         linearLayout.addView(headerTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 28, 14, 28, 0));
 
         TextView messageTextView = new TextView(getContext());
@@ -313,24 +345,24 @@ public class UnconfirmedAuthHintCell extends FrameLayout {
             }
             messageTextView.setText(LocaleController.formatString(R.string.UnconfirmedAuthDeniedMessageMultiple, from));
         }
-        messageTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        ThemeBind.textColor(messageTextView, Theme.key_dialogTextBlack);
         linearLayout.addView(messageTextView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 40, 9, 40, 0));
 
         FrameLayout warningLayout = new FrameLayout(getContext());
-        warningLayout.setPadding(dp(10), dp(10), dp(10), dp(10));
-        warningLayout.setBackground(Theme.createRoundRectDrawable(dp(8), Theme.multAlpha(Theme.getColor(Theme.key_text_RedBold), Theme.isCurrentThemeDark() ? .2f : .15f)));
+        warningLayout.setPadding(dp(24), dp(10), dp(24), dp(10));
+        ThemeBind.fillBackground(warningLayout, Theme.createRoundRectDrawable(dp(12), Theme.multAlpha(Theme.getColor(Theme.key_text_RedBold), Theme.isCurrentThemeDark() ? .2f : .15f)), ThemeBind.multAlpha(Theme.key_text_RedBold, Theme.isCurrentThemeDark() ? .2f : .15f));
 
         TextView warningTextView = new TextView(getContext());
-        warningTextView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        warningTextView.setTypeface(AndroidUtilities.bold());
         warningTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         warningTextView.setGravity(Gravity.CENTER);
-        warningTextView.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+        ThemeBind.textColor(warningTextView, Theme.key_text_RedBold);
         warningTextView.setText(LocaleController.getString(R.string.UnconfirmedAuthDeniedWarning));
         warningLayout.addView(warningTextView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
 
         linearLayout.addView(warningLayout, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 14, 19, 14, 0));
 
-        ButtonWithCounterView button = new ButtonWithCounterView(getContext(), null);
+        ButtonWithCounterView button = new ButtonWithCounterView(getContext(), null).setRound();
         ScaleStateListAnimator.apply(button, 0.02f, 1.5f);
         button.setText(LocaleController.getString(R.string.GotIt), false);
         linearLayout.addView(button, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 48, 14, 20, 14, 4));

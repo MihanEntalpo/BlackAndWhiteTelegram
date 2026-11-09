@@ -14,6 +14,7 @@ import android.content.Intent;
 import android.content.IntentFilter;
 import android.content.SharedPreferences;
 import android.net.ConnectivityManager;
+import android.os.Build;
 import android.util.Pair;
 import android.util.SparseArray;
 
@@ -23,6 +24,8 @@ import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.SQLite.SQLitePreparedStatement;
 import org.telegram.tgnet.NativeByteBuffer;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
+import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.LaunchActivity;
 
@@ -334,7 +337,11 @@ public class DownloadController extends BaseController implements NotificationCe
             }
         };
         IntentFilter filter = new IntentFilter(ConnectivityManager.CONNECTIVITY_ACTION);
-        ApplicationLoader.applicationContext.registerReceiver(networkStateReceiver, filter);
+        if (Build.VERSION.SDK_INT >= 33) {
+            ApplicationLoader.applicationContext.registerReceiver(networkStateReceiver, filter, Context.RECEIVER_NOT_EXPORTED);
+        } else {
+            ApplicationLoader.applicationContext.registerReceiver(networkStateReceiver, filter);
+        }
 
         if (getUserConfig().isClientActivated()) {
             checkAutodownloadSettings();
@@ -346,13 +353,13 @@ public class DownloadController extends BaseController implements NotificationCe
             return;
         }
         loadingAutoDownloadConfig = true;
-        TLRPC.TL_account_getAutoDownloadSettings req = new TLRPC.TL_account_getAutoDownloadSettings();
+        TL_account.getAutoDownloadSettings req = new TL_account.getAutoDownloadSettings();
         getConnectionsManager().sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
             loadingAutoDownloadConfig = false;
             getUserConfig().autoDownloadConfigLoadTime = System.currentTimeMillis();
             getUserConfig().saveConfig(false);
             if (response != null) {
-                TLRPC.TL_account_autoDownloadSettings res = (TLRPC.TL_account_autoDownloadSettings) response;
+                TL_account.autoDownloadSettings res = (TL_account.autoDownloadSettings) response;
                 lowPreset.set(res.low);
                 lowPreset.preloadStories = false;
                 mediumPreset.set(res.medium);
@@ -600,7 +607,21 @@ public class DownloadController extends BaseController implements NotificationCe
     }
 
     public boolean canDownloadMedia(MessageObject messageObject) {
-        return canDownloadMedia(messageObject.messageOwner) == 1;
+        if (messageObject.type == MessageObject.TYPE_STORY) {
+            if (!SharedConfig.isAutoplayVideo()) return false;
+            TLRPC.TL_messageMediaStory mediaStory = (TLRPC.TL_messageMediaStory) MessageObject.getMedia(messageObject);
+            TL_stories.StoryItem storyItem = mediaStory.storyItem;
+            if (storyItem == null || storyItem.media == null || storyItem.media.document == null || !storyItem.isPublic) {
+                return false;
+            }
+            return true;
+        }
+        if (messageObject.sponsoredMedia != null) {
+            return true;
+        }
+        if (messageObject.isHiddenSensitive())
+            return false;
+        return canDownloadMediaInternal(messageObject) == 1;
     }
 
     public boolean canDownloadMedia(int type, long size) {
@@ -626,6 +647,215 @@ public class DownloadController extends BaseController implements NotificationCe
         int mask = preset.mask[1];
         long maxSize = preset.sizes[typeToIndex(type)];
         return (type == AUTODOWNLOAD_TYPE_PHOTO || size != 0 && size <= maxSize) && (type == AUTODOWNLOAD_TYPE_AUDIO || (mask & type) != 0);
+    }
+
+    public int canDownloadMediaType(MessageObject messageObject) {
+        if (messageObject.type == MessageObject.TYPE_STORY) {
+            if (!SharedConfig.isAutoplayVideo()) return 0;
+            TLRPC.TL_messageMediaStory mediaStory = (TLRPC.TL_messageMediaStory) MessageObject.getMedia(messageObject);
+            TL_stories.StoryItem storyItem = mediaStory.storyItem;
+            if (storyItem == null || storyItem.media == null || storyItem.media.document == null || !storyItem.isPublic) {
+                return 0;
+            }
+            return 2;
+        }
+        if (messageObject.sponsoredMedia != null) {
+            return 2;
+        }
+        if (messageObject.isHiddenSensitive())
+            return 0;
+        return canDownloadMediaInternal(messageObject);
+    }
+
+    public int canDownloadMediaType(MessageObject messageObject, long overrideSize) {
+        if (messageObject.type == MessageObject.TYPE_STORY) {
+            if (!SharedConfig.isAutoplayVideo()) return 0;
+            TLRPC.TL_messageMediaStory mediaStory = (TLRPC.TL_messageMediaStory) MessageObject.getMedia(messageObject);
+            TL_stories.StoryItem storyItem = mediaStory.storyItem;
+            if (storyItem == null || storyItem.media == null || storyItem.media.document == null || !storyItem.isPublic) {
+                return 0;
+            }
+            return 2;
+        }
+        if (messageObject.sponsoredMedia != null) {
+            return 2;
+        }
+        if (messageObject.isHiddenSensitive())
+            return 0;
+        return canDownloadMediaInternal(messageObject, overrideSize);
+    }
+
+    private int canDownloadMediaInternal(MessageObject message) {
+        if (message == null || message.messageOwner == null) return 0;
+        if (message.messageOwner.media instanceof TLRPC.TL_messageMediaStory) {
+            return canPreloadStories() ? 2 : 0;
+        }
+        TLRPC.Message msg = message.messageOwner;
+        int type;
+        boolean isVideo;
+        if ((isVideo = MessageObject.isVideoMessage(msg)) || MessageObject.isGifMessage(msg) || MessageObject.isRoundVideoMessage(msg) || MessageObject.isGameMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_VIDEO;
+        } else if (MessageObject.isVoiceMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_AUDIO;
+        } else if (MessageObject.isPhoto(msg) || MessageObject.isStickerMessage(msg) || MessageObject.isAnimatedStickerMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_PHOTO;
+        } else if (MessageObject.getDocument(msg) != null) {
+            type = AUTODOWNLOAD_TYPE_DOCUMENT;
+        } else {
+            return 0;
+        }
+        int index;
+        TLRPC.Peer peer = msg.peer_id;
+        if (peer != null) {
+            if (peer.user_id != 0) {
+                if (getContactsController().contactsDict.containsKey(peer.user_id)) {
+                    index = 0;
+                } else {
+                    index = 1;
+                }
+            } else if (peer.chat_id != 0) {
+                if (msg.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(msg.from_id.user_id)) {
+                    index = 0;
+                } else {
+                    index = 2;
+                }
+            } else {
+                TLRPC.Chat chat = msg.peer_id.channel_id != 0 ? getMessagesController().getChat(msg.peer_id.channel_id) : null;
+                if (ChatObject.isChannel(chat) && chat.megagroup) {
+                    if (msg.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(msg.from_id.user_id)) {
+                        index = 0;
+                    } else {
+                        index = 2;
+                    }
+                } else {
+                    index = 3;
+                }
+            }
+        } else {
+            index = 1;
+        }
+        Preset preset;
+        int networkType = ApplicationLoader.getAutodownloadNetworkType();
+        if (networkType == StatsController.TYPE_WIFI) {
+            if (!wifiPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentWiFiPreset();
+
+        } else if (networkType == StatsController.TYPE_ROAMING) {
+            if (!roamingPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentRoamingPreset();
+        } else {
+            if (!mobilePreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentMobilePreset();
+        }
+        int mask = preset.mask[index];
+        long maxSize;
+        if (type == AUTODOWNLOAD_TYPE_AUDIO) {
+            maxSize = Math.max(512 * 1024, preset.sizes[typeToIndex(type)]);
+        } else {
+            maxSize = preset.sizes[typeToIndex(type)];
+        }
+        long size;
+        if (message.highestQuality != null) {
+            size = message.highestQuality.document.size;
+        } else if (message.thumbQuality != null) {
+            size = message.thumbQuality.document.size;
+        } else {
+            size = MessageObject.getMessageSize(msg);
+        }
+        if (isVideo && preset.preloadVideo && size > maxSize && maxSize > 2 * 1024 * 1024) {
+            return (mask & type) != 0 ? 2 : 0;
+        } else {
+            return (type == AUTODOWNLOAD_TYPE_PHOTO || size != 0 && size <= maxSize) && (type == AUTODOWNLOAD_TYPE_AUDIO || (mask & type) != 0) ? 1 : 0;
+        }
+    }
+
+    private int canDownloadMediaInternal(MessageObject message, long overrideSize) {
+        if (message == null || message.messageOwner == null) return 0;
+        if (message.messageOwner.media instanceof TLRPC.TL_messageMediaStory) {
+            return canPreloadStories() ? 2 : 0;
+        }
+        TLRPC.Message msg = message.messageOwner;
+        int type;
+        boolean isVideo;
+        if ((isVideo = MessageObject.isVideoMessage(msg)) || MessageObject.isGifMessage(msg) || MessageObject.isRoundVideoMessage(msg) || MessageObject.isGameMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_VIDEO;
+        } else if (MessageObject.isVoiceMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_AUDIO;
+        } else if (MessageObject.isPhoto(msg) || MessageObject.isStickerMessage(msg) || MessageObject.isAnimatedStickerMessage(msg)) {
+            type = AUTODOWNLOAD_TYPE_PHOTO;
+        } else if (MessageObject.getDocument(msg) != null) {
+            type = AUTODOWNLOAD_TYPE_DOCUMENT;
+        } else {
+            return 0;
+        }
+        int index;
+        TLRPC.Peer peer = msg.peer_id;
+        if (peer != null) {
+            if (peer.user_id != 0) {
+                if (getContactsController().contactsDict.containsKey(peer.user_id)) {
+                    index = 0;
+                } else {
+                    index = 1;
+                }
+            } else if (peer.chat_id != 0) {
+                if (msg.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(msg.from_id.user_id)) {
+                    index = 0;
+                } else {
+                    index = 2;
+                }
+            } else {
+                TLRPC.Chat chat = msg.peer_id.channel_id != 0 ? getMessagesController().getChat(msg.peer_id.channel_id) : null;
+                if (ChatObject.isChannel(chat) && chat.megagroup) {
+                    if (msg.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(msg.from_id.user_id)) {
+                        index = 0;
+                    } else {
+                        index = 2;
+                    }
+                } else {
+                    index = 3;
+                }
+            }
+        } else {
+            index = 1;
+        }
+        Preset preset;
+        int networkType = ApplicationLoader.getAutodownloadNetworkType();
+        if (networkType == StatsController.TYPE_WIFI) {
+            if (!wifiPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentWiFiPreset();
+
+        } else if (networkType == StatsController.TYPE_ROAMING) {
+            if (!roamingPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentRoamingPreset();
+        } else {
+            if (!mobilePreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentMobilePreset();
+        }
+        final int mask = preset.mask[index];
+        final long maxSize;
+        if (type == AUTODOWNLOAD_TYPE_AUDIO) {
+            maxSize = Math.max(512 * 1024, preset.sizes[typeToIndex(type)]);
+        } else {
+            maxSize = preset.sizes[typeToIndex(type)];
+        }
+        final long size = overrideSize;
+        if (isVideo && preset.preloadVideo && size > maxSize && maxSize > 2 * 1024 * 1024) {
+            return (mask & type) != 0 ? 2 : 0;
+        } else {
+            return (type == AUTODOWNLOAD_TYPE_PHOTO || size != 0 && size <= maxSize) && (type == AUTODOWNLOAD_TYPE_AUDIO || (mask & type) != 0) ? 1 : 0;
+        }
     }
 
     public int canDownloadMedia(TLRPC.Message message) {
@@ -709,6 +939,88 @@ public class DownloadController extends BaseController implements NotificationCe
         }
     }
 
+    public int canDownloadMedia(TLRPC.Message message, TLRPC.MessageMedia media) {
+        if (message == null || media instanceof TLRPC.TL_messageMediaStory) {
+            return canPreloadStories() ? 2 : 0;
+        }
+        int type;
+        boolean isVideo = false;
+        if (MessageObject.isVideoDocument(media.document)) {
+            isVideo = true;
+            type = AUTODOWNLOAD_TYPE_VIDEO;
+        } else if (MessageObject.isVoiceDocument(media.document)) {
+            type = AUTODOWNLOAD_TYPE_AUDIO;
+        } else if (media instanceof TLRPC.TL_messageMediaPhoto) {
+            type = AUTODOWNLOAD_TYPE_PHOTO;
+        } else if (media.document != null) {
+            type = AUTODOWNLOAD_TYPE_DOCUMENT;
+        } else {
+            return 0;
+        }
+        int index;
+        TLRPC.Peer peer = message.peer_id;
+        if (peer != null) {
+            if (peer.user_id != 0) {
+                if (getContactsController().contactsDict.containsKey(peer.user_id)) {
+                    index = 0;
+                } else {
+                    index = 1;
+                }
+            } else if (peer.chat_id != 0) {
+                if (message.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(message.from_id.user_id)) {
+                    index = 0;
+                } else {
+                    index = 2;
+                }
+            } else {
+                TLRPC.Chat chat = message.peer_id.channel_id != 0 ? getMessagesController().getChat(message.peer_id.channel_id) : null;
+                if (ChatObject.isChannel(chat) && chat.megagroup) {
+                    if (message.from_id instanceof TLRPC.TL_peerUser && getContactsController().contactsDict.containsKey(message.from_id.user_id)) {
+                        index = 0;
+                    } else {
+                        index = 2;
+                    }
+                } else {
+                    index = 3;
+                }
+            }
+        } else {
+            index = 1;
+        }
+        Preset preset;
+        int networkType = ApplicationLoader.getAutodownloadNetworkType();
+        if (networkType == StatsController.TYPE_WIFI) {
+            if (!wifiPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentWiFiPreset();
+
+        } else if (networkType == StatsController.TYPE_ROAMING) {
+            if (!roamingPreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentRoamingPreset();
+        } else {
+            if (!mobilePreset.enabled) {
+                return 0;
+            }
+            preset = getCurrentMobilePreset();
+        }
+        int mask = preset.mask[index];
+        long maxSize;
+        if (type == AUTODOWNLOAD_TYPE_AUDIO) {
+            maxSize = Math.max(512 * 1024, preset.sizes[typeToIndex(type)]);
+        } else {
+            maxSize = preset.sizes[typeToIndex(type)];
+        }
+        long size = MessageObject.getMediaSize(media);
+        if (isVideo && preset.preloadVideo && size > maxSize && maxSize > 2 * 1024 * 1024) {
+            return (mask & type) != 0 ? 2 : 0;
+        } else {
+            return (type == AUTODOWNLOAD_TYPE_PHOTO || size != 0 && size <= maxSize) && (type == AUTODOWNLOAD_TYPE_AUDIO || (mask & type) != 0) ? 1 : 0;
+        }
+    }
+
     protected boolean canDownloadNextTrack() {
         int networkType = ApplicationLoader.getAutodownloadNetworkType();
         if (networkType == StatsController.TYPE_WIFI) {
@@ -753,7 +1065,7 @@ public class DownloadController extends BaseController implements NotificationCe
     }
 
     public void savePresetToServer(int type) {
-        TLRPC.TL_account_saveAutoDownloadSettings req = new TLRPC.TL_account_saveAutoDownloadSettings();
+        TL_account.saveAutoDownloadSettings req = new TL_account.saveAutoDownloadSettings();
         Preset preset;
         boolean enabled;
         if (type == 0) {
@@ -1177,8 +1489,8 @@ public class DownloadController extends BaseController implements NotificationCe
                         state.bindByteBuffer(1, data);
                         state.bindInteger(2, parentObject.getDocument().dc_id);
                         state.bindLong(3, parentObject.getDocument().id);
-                        state.bindLong(4, System.currentTimeMillis());
                         state.bindInteger(4, 0);
+                        state.bindLong(5, System.currentTimeMillis());
 
                         state.step();
                         state.dispose();
@@ -1224,40 +1536,7 @@ public class DownloadController extends BaseController implements NotificationCe
                     try {
                         String req = String.format(Locale.ENGLISH, "UPDATE downloading_documents SET state = 1, date = %d WHERE hash = %d AND id = %d", System.currentTimeMillis(), parentObject.getDocument().dc_id,  parentObject.getDocument().id);
                         getMessagesStorage().getDatabase().executeFast(req).stepThis().dispose();
-                        SQLiteCursor cursor = getMessagesStorage().getDatabase().queryFinalized("SELECT COUNT(*) FROM downloading_documents WHERE state = 1");
-                        int count = 0;
-                        if (cursor.next()) {
-                            count = cursor.intValue(0);
-                        }
-                        cursor.dispose();
-
-                        cursor = getMessagesStorage().getDatabase().queryFinalized("SELECT state FROM downloading_documents WHERE state = 1");
-                        if (cursor.next()) {
-                            int state = cursor.intValue(0);
-                        }
-                        cursor.dispose();
-
-                        int limitDownloadsDocuments = 100;
-                        if (count > limitDownloadsDocuments) {
-                            cursor = getMessagesStorage().getDatabase().queryFinalized("SELECT hash, id FROM downloading_documents WHERE state = 1 ORDER BY date ASC LIMIT " + (limitDownloadsDocuments - count));
-                            ArrayList<DownloadingDocumentEntry> entriesToRemove = new ArrayList<>();
-                            while (cursor.next()) {
-                                DownloadingDocumentEntry entry = new DownloadingDocumentEntry();
-                                entry.hash = cursor.intValue(0);
-                                entry.id = cursor.longValue(1);
-                                entriesToRemove.add(entry);
-                            }
-                            cursor.dispose();
-
-                            SQLitePreparedStatement state = getMessagesStorage().getDatabase().executeFast("DELETE FROM downloading_documents WHERE hash = ? AND id = ?");
-                            for (int i = 0; i < entriesToRemove.size(); i++) {
-                                state.requery();
-                                state.bindInteger(1, entriesToRemove.get(i).hash);
-                                state.bindLong(2, entriesToRemove.get(i).id);
-                                state.step();
-                            }
-                            state.dispose();
-                        }
+                        getMessagesStorage().getDatabase().executeFast("DELETE FROM downloading_documents WHERE state = 1 AND rowid NOT IN (SELECT rowid FROM downloading_documents WHERE state = 1 ORDER BY date DESC LIMIT 100)").stepThis().dispose();
                     } catch (Exception e) {
                         FileLog.e(e);
                     }
@@ -1338,17 +1617,13 @@ public class DownloadController extends BaseController implements NotificationCe
         return unviewedDownloads.size() > 0;
     }
 
-    private class DownloadingDocumentEntry {
-        long id;
-        int hash;
-    }
-
     public void loadDownloadingFiles() {
         getMessagesStorage().getStorageQueue().postRunnable(() -> {
             ArrayList<MessageObject> downloadingMessages = new ArrayList<>();
             ArrayList<MessageObject> recentlyDownloadedMessages = new ArrayList<>();
             ArrayList<MessageObject> newMessages = new ArrayList<>();
             try {
+                getMessagesStorage().getDatabase().executeFast("DELETE FROM downloading_documents WHERE state = 1 AND rowid NOT IN (SELECT rowid FROM downloading_documents WHERE state = 1 ORDER BY date DESC LIMIT 100)").stepThis().dispose();
                 SQLiteCursor cursor2 = getMessagesStorage().getDatabase().queryFinalized("SELECT data, state FROM downloading_documents ORDER BY date DESC");
                 while (cursor2.next()) {
                     NativeByteBuffer data = cursor2.byteBufferValue(0);

@@ -2,6 +2,7 @@ package org.telegram.tgnet;
 
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLog;
+import org.telegram.messenger.Utilities;
 
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
@@ -506,6 +507,16 @@ public class NativeByteBuffer extends AbstractSerializedData {
         }
     }
 
+    public String hex() {
+        try {
+            byte[] bytes = readData(Math.min(limit(), 1024), true);
+            return Utilities.bytesToHex(bytes);
+        } catch (Exception e) {
+            FileLog.e(e);
+            return "<err>";
+        }
+    }
+
     public byte[] readData(int count, boolean exception) {
         byte[] arr = new byte[count];
         readBytes(arr, exception);
@@ -521,6 +532,11 @@ public class NativeByteBuffer extends AbstractSerializedData {
                 l = getIntFromByte(buffer.get()) | (getIntFromByte(buffer.get()) << 8) | (getIntFromByte(buffer.get()) << 16);
                 sl = 4;
             }
+
+            if (l > remaining() || l < 0) {
+                throw new RuntimeException("string size too big");
+            }
+
             byte[] b = new byte[l];
             buffer.get(b);
             int i = sl;
@@ -551,6 +567,11 @@ public class NativeByteBuffer extends AbstractSerializedData {
                 l = getIntFromByte(buffer.get()) | (getIntFromByte(buffer.get()) << 8) | (getIntFromByte(buffer.get()) << 16);
                 sl = 4;
             }
+
+            if (l > remaining() || l < 0) {
+                throw new RuntimeException("byte array size too big");
+            }
+
             byte[] b = new byte[l];
             buffer.get(b);
             int i = sl;
@@ -580,6 +601,11 @@ public class NativeByteBuffer extends AbstractSerializedData {
                 l = getIntFromByte(buffer.get()) | (getIntFromByte(buffer.get()) << 8) | (getIntFromByte(buffer.get()) << 16);
                 sl = 4;
             }
+
+            if (l > remaining() || l < 0) {
+                throw new RuntimeException("byte array size too big");
+            }
+
             NativeByteBuffer b = new NativeByteBuffer(l);
             int old = buffer.limit();
             buffer.limit(buffer.position() + l);

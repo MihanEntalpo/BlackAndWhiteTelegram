@@ -23,6 +23,7 @@ import android.view.View;
 
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.DialogObject;
 import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
@@ -30,6 +31,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
@@ -123,7 +125,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         counterDrawable.textPaint = textPaint;
 
         textPaint.setTextSize(AndroidUtilities.dp(13));
-        textPaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        textPaint.setTypeface(AndroidUtilities.bold());
         textPaint2.setTextSize(AndroidUtilities.dp(14));
 
         xRefPaint.setColor(0xff000000);
@@ -201,15 +203,17 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
                     animatedEmojiDrawable.removeView(parentView);
                 }
                 animatedEmojiDrawable = null;
-                forumIcon = ForumUtilities.createGeneralTopicDrawable(fragmentView.getContext(), 1f, getThemedColor(Theme.key_chat_inMenu), false);
+                forumIcon = ForumUtilities.createGeneralTopicDrawable(fragmentView.getContext(), 1f, getThemedColor(Theme.key_chat_inMenu), false, true);
+                generalTopicDrawable = forumIcon instanceof ForumUtilities.GeneralTopicDrawable ? (ForumUtilities.GeneralTopicDrawable) forumIcon : null;
+                generalTopicColor = getThemedColor(Theme.key_chat_inMenu);
                 imageReceiver.setImageBitmap(forumIcon);
             } else if (topic.icon_emoji_id != 0) {
                 if (animatedEmojiDrawable == null || animatedEmojiDrawable.getDocumentId() != topic.icon_emoji_id) {
                     if (animatedEmojiDrawable != null && parentView != null) {
                         animatedEmojiDrawable.removeView(parentView);
                     }
-                    animatedEmojiDrawable = new AnimatedEmojiDrawable(AnimatedEmojiDrawable.CACHE_TYPE_FORUM_TOPIC_LARGE, currentAccount, topic.icon_emoji_id);
-                    animatedEmojiDrawable.setColorFilter(new PorterDuffColorFilter(getThemedColor(Theme.key_chat_serviceText), PorterDuff.Mode.SRC_IN));
+                    animatedEmojiDrawable = new AnimatedEmojiDrawable(AnimatedEmojiDrawable.CACHE_TYPE_FORUM_TOPIC_PULL_DOWN, currentAccount, topic.icon_emoji_id);
+                    animatedEmojiDrawable.setColorFilter(new PorterDuffColorFilter(animatedEmojiColor = getThemedColor(Theme.key_chat_serviceText), PorterDuff.Mode.SRC_IN));
                 }
                 if (animatedEmojiDrawable != null && parentView != null) {
                     animatedEmojiDrawable.addView(parentView);
@@ -294,6 +298,31 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
 
     }
 
+    private ForumUtilities.GeneralTopicDrawable generalTopicDrawable;
+    private int generalTopicColor, animatedEmojiColor;
+
+    // topic icons colored once on creation: follow theme changes (only a new color filter / color when the color changed)
+    private void updateTopicIconColors() {
+        try {
+            if (generalTopicDrawable != null && nextTopic != null && nextTopic.id == 1) {
+                final int color = getThemedColor(Theme.key_chat_inMenu);
+                if (color != generalTopicColor) {
+                    generalTopicColor = color;
+                    generalTopicDrawable.setColor(color);
+                }
+            }
+            if (animatedEmojiDrawable != null) {
+                final int color = getThemedColor(Theme.key_chat_serviceText);
+                if (color != animatedEmojiColor) {
+                    animatedEmojiColor = color;
+                    animatedEmojiDrawable.setColorFilter(new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN));
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
     public void draw(Canvas canvas, View parent, float progress, float alpha) {
         if (this.parentView != parent) {
             this.parentView = parent;
@@ -313,8 +342,10 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         }
         Theme.applyServiceShaderMatrix(lastWidth, parent.getMeasuredHeight(), 0, parent.getMeasuredHeight() - offset);
 
-        textPaint.setColor(getThemedColor(Theme.key_chat_serviceText));
-        arrowPaint.setColor(getThemedColor(Theme.key_chat_serviceText));
+        updateTopicIconColors();
+        final int textColor = getThemedColor(Theme.isCompactMode(resourcesProvider) ? Theme.key_chat_compact_pullingDownText : Theme.key_chat_serviceText);
+        textPaint.setColor(textColor);
+        arrowPaint.setColor(textColor);
         textPaint2.setColor(getThemedColor(Theme.key_chat_messagePanelHint));
 
         oldAlpha = getThemedPaint(Theme.key_paint_chatActionBackground).getAlpha();
@@ -324,12 +355,13 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         Theme.chat_actionBackgroundGradientDarkenPaint.setAlpha((int) (oldAlpha1 * alpha));
         getThemedPaint(Theme.key_paint_chatActionBackground).setAlpha((int) (oldAlpha * alpha));
         textPaint.setAlpha((int) (oldAlpha2 * alpha));
-        imageReceiver.setAlpha(alpha);
 
         if ((progress >= 1f && lastProgress < 1f) || (progress < 1f && lastProgress == 1f)) {
             long time = System.currentTimeMillis();
             if (time - lastHapticTime > 100) {
-                parent.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                try {
+                    parent.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP, HapticFeedbackConstants.FLAG_IGNORE_GLOBAL_SETTING);
+                } catch (Exception ignored) {}
                 lastHapticTime = time;
             }
             lastProgress = progress;
@@ -360,11 +392,13 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         if (swipeToReleaseProgress < 1f || emptyStub) {
             float bottom = -AndroidUtilities.dp(8) * (1f - swipeToReleaseProgress) + (-offset + AndroidUtilities.dp(56)) * swipeToReleaseProgress;
             AndroidUtilities.rectTmp.set(cx - widthRadius, -offset, cx + widthRadius, bottom);
+            float bgAlpha = 1f;
             if (swipeToReleaseProgress > 0 && !emptyStub) {
                 float inset = AndroidUtilities.dp(16) * swipeToReleaseProgress;
                 AndroidUtilities.rectTmp.inset(inset, inset);
+                bgAlpha = 1 - swipeToReleaseProgress;
             }
-            drawBackground(canvas, AndroidUtilities.rectTmp);
+            drawBackground(canvas, AndroidUtilities.rectTmp, bgAlpha);
 
             float arrowCy = -offset + AndroidUtilities.dp(24) + AndroidUtilities.dp(8) * (1f - progress) - AndroidUtilities.dp(36) * swipeToReleaseProgress;
             canvas.save();
@@ -412,6 +446,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
             } else {
                 finalImageReceiver = imageReceiver;
             }
+            finalImageReceiver.setAlpha(alpha);
             finalImageReceiver.setRoundRadius((int) (size / 2f));
             finalImageReceiver.setImageCoords(cx - size / 2f, top, size, size);
             if (isTopic && finalImageReceiver.getDrawable() != null && finalImageReceiver.getDrawable() instanceof CombinedDrawable && ((CombinedDrawable) finalImageReceiver.getDrawable()).getIcon() instanceof LetterDrawable) {
@@ -436,14 +471,13 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
             } else {
                 finalImageReceiver.draw(canvas);
             }
+            finalImageReceiver.setAlpha(1f);
         }
 
         getThemedPaint(Theme.key_paint_chatActionBackground).setAlpha(oldAlpha);
         Theme.chat_actionBackgroundGradientDarkenPaint.setAlpha(oldAlpha1);
         textPaint.setAlpha(oldAlpha2);
         arrowPaint.setAlpha(oldAlpha3);
-        imageReceiver.setAlpha(1f);
-
     }
 
     private void drawCheck(Canvas canvas, float cx, float cy) {
@@ -474,7 +508,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         canvas.restore();
     }
 
-    private void drawBackground(Canvas canvas, RectF rectTmp) {
+    private void drawBackground(Canvas canvas, RectF rectTmp, float alpha) {
         if (drawFolderBackground) {
             path.reset();
             float roundRadius = rectTmp.width() * 0.2f;
@@ -502,9 +536,15 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
                 canvas.drawPath(path, Theme.chat_actionBackgroundGradientDarkenPaint);
             }
         } else {
+            int oldAlpha1 = getThemedPaint(Theme.key_paint_chatActionBackground).getAlpha();
+            getThemedPaint(Theme.key_paint_chatActionBackground).setAlpha((int) (oldAlpha1 * alpha));
             canvas.drawRoundRect(AndroidUtilities.rectTmp, circleRadius, circleRadius, getThemedPaint(Theme.key_paint_chatActionBackground));
+            getThemedPaint(Theme.key_paint_chatActionBackground).setAlpha(oldAlpha1);
             if (hasGradientService()) {
+                int oldAlpha2 = Theme.chat_actionBackgroundGradientDarkenPaint.getAlpha();
+                Theme.chat_actionBackgroundGradientDarkenPaint.setAlpha((int) (oldAlpha2 * alpha));
                 canvas.drawRoundRect(AndroidUtilities.rectTmp, circleRadius, circleRadius, Theme.chat_actionBackgroundGradientDarkenPaint);
+                Theme.chat_actionBackgroundGradientDarkenPaint.setAlpha(oldAlpha2);
             }
         }
     }
@@ -606,7 +646,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         if (animatedEmojiDrawable != null && parentView != null) {
             animatedEmojiDrawable.addView(parentView);
         }
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.updateInterfaces);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.updateInterfaces);
     }
 
     public void onDetach() {
@@ -663,7 +703,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
             TLRPC.Dialog dialog = dialogs.get(i);
             TLRPC.Chat chat = messagesController.getChat(-dialog.id);
             if (chat != null && dialog.id != currentDialogId && dialog.unread_count > 0 && DialogObject.isChannel(dialog) && !chat.megagroup && !messagesController.isPromoDialog(dialog.id, false)) {
-                String reason = MessagesController.getRestrictionReason(chat.restriction_reason);
+                String reason = messagesController.getRestrictionReason(chat.restriction_reason);
                 if (reason == null) {
                     return dialog;
                 }
@@ -709,7 +749,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         if (topics != null && topics.size() > 1) {
             for (int i = 0; i < topics.size(); i++) {
                 TLRPC.TL_forumTopic topic = topics.get(i);
-                if (topic.id != topicId && !topic.hidden && topic.unread_count > 0 && (nextUnreadTopic == null || topic.topMessage.date > nextUnreadTopic.topMessage.date)) {
+                if (topic.id != topicId && !topic.hidden && topic.unread_count > 0 && (nextUnreadTopic == null || topic.topMessage != null && nextUnreadTopic.topMessage != null && topic.topMessage.date > nextUnreadTopic.topMessage.date)) {
                     nextUnreadTopic = topic;
                 }
             }
@@ -718,6 +758,7 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
     }
 
     public long getChatId() {
+        if (nextChat == null) return 0;
         return nextChat.id;
     }
 
@@ -726,29 +767,13 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
     }
 
     public void drawBottomPanel(Canvas canvas, int top, int bottom, int width) {
-        if (showBottomPanel && progressToBottomPanel != 1f) {
-            progressToBottomPanel += 16f / 150f;
-            if (progressToBottomPanel > 1f) {
-                progressToBottomPanel = 1f;
-            } else {
-                fragmentView.invalidate();
-            }
-        } else if (!showBottomPanel && progressToBottomPanel != 0) {
-            progressToBottomPanel -= 16f / 150f;
-            if (progressToBottomPanel < 0) {
-                progressToBottomPanel = 0;
-            } else {
-                fragmentView.invalidate();
-            }
-        }
-
-        textPaint2.setColor(getThemedColor(Theme.key_chat_messagePanelHint));
+        textPaint2.setColor(getThemedColor(Theme.key_glass_defaultText));
         Paint composeBackgroundPaint = getThemedPaint(Theme.key_paint_chatComposeBackground);
         int oldAlpha = composeBackgroundPaint.getAlpha();
         int oldAlphaText = textPaint2.getAlpha();
 
         composeBackgroundPaint.setAlpha((int) (oldAlpha * progressToBottomPanel));
-        canvas.drawRect(0, top, width, bottom, composeBackgroundPaint);
+        // canvas.drawRect(0, top, width, bottom, composeBackgroundPaint);
 
         if (layout1 != null && swipeToReleaseProgress < 1f) {
             textPaint2.setAlpha((int) (oldAlphaText * (1f - swipeToReleaseProgress) * progressToBottomPanel));
@@ -772,15 +797,8 @@ public class ChatPullingDownDrawable implements NotificationCenter.NotificationC
         composeBackgroundPaint.setAlpha(oldAlpha);
     }
 
-    boolean showBottomPanel;
-
-    public void showBottomPanel(boolean b) {
-        showBottomPanel = b;
-        fragmentView.invalidate();
-    }
-
     public boolean needDrawBottomPanel() {
-        return (showBottomPanel || progressToBottomPanel > 0) && !emptyStub;
+        return (progressToBottomPanel > 0) && !emptyStub;
     }
 
     public boolean animationIsRunning() {

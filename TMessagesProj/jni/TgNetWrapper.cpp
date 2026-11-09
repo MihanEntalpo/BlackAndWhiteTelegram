@@ -6,6 +6,12 @@
 #include "tgnet/MTProtoScheme.h"
 #include "tgnet/ConnectionSocket.h"
 #include "tgnet/FileLog.h"
+#include "tgnet/Handshake.h"
+#include <openssl/rand.h>
+#include <openssl/sha.h>
+#include <openssl/bn.h>
+#include <openssl/pem.h>
+#include <openssl/aes.h>
 
 JavaVM *java;
 
@@ -31,6 +37,8 @@ jmethodID jclass_ConnectionsManager_onProxyError;
 jmethodID jclass_ConnectionsManager_getHostByName;
 jmethodID jclass_ConnectionsManager_getInitFlags;
 jmethodID jclass_ConnectionsManager_onPremiumFloodWait;
+jmethodID jclass_ConnectionsManager_onIntegrityCheckClassic;
+jmethodID jclass_ConnectionsManager_onCaptchaCheck;
 
 bool check_utf8(const char *data, size_t len);
 
@@ -78,8 +86,16 @@ jint getCurrentTime(JNIEnv *env, jclass c, jint instanceNum) {
     return ConnectionsManager::getInstance(instanceNum).getCurrentTime();
 }
 
+jint getCurrentPingTime(JNIEnv *env, jclass c, jint instanceNum) {
+    return ConnectionsManager::getInstance(instanceNum).getCurrentPingTime();
+}
+
 jint getCurrentDatacenterId(JNIEnv *env, jclass c, jint instanceNum) {
     return ConnectionsManager::getInstance(instanceNum).getCurrentDatacenterId();
+}
+
+jlong getCurrentAuthKeyId(JNIEnv *env, jclass c, jint instanceNum) {
+    return ConnectionsManager::getInstance(instanceNum).getCurrentAuthKeyId();
 }
 
 jint isTestBackend(JNIEnv *env, jclass c, jint instanceNum) {
@@ -90,10 +106,11 @@ jint getTimeDifference(JNIEnv *env, jclass c, jint instanceNum) {
     return ConnectionsManager::getInstance(instanceNum).getTimeDifference();
 }
 
-void sendRequest(JNIEnv *env, jclass c, jint instanceNum, jlong object, jint flags, jint datacenterId, jint connectionType, jboolean immediate, jint token) {
+void sendRequest(JNIEnv *env, jclass c, jint instanceNum, jlong object, jint flags, jint datacenterId, jint connectionType, jboolean immediate, jint token, jint downloadSize) {
     TL_api_request *request = new TL_api_request();
     request->request = (NativeByteBuffer *) (intptr_t) object;
-    ConnectionsManager::getInstance(instanceNum).sendRequest(request, ([instanceNum, token](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId) {
+    request->downloadSize = downloadSize > 0 ? (uint32_t) downloadSize : 0;
+    ConnectionsManager::getInstance(instanceNum).sendRequest(request, ([instanceNum, token](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId, int32_t dcId) {
         TL_api_response *resp = (TL_api_response *) response;
         jlong ptr = 0;
         jint errorCode = 0;
@@ -110,7 +127,7 @@ void sendRequest(JNIEnv *env, jclass c, jint instanceNum, jlong object, jint fla
                 errorText = jniEnv[instanceNum]->NewStringUTF("UTF-8 ERROR");
             }
         }
-        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestComplete, instanceNum, token, ptr, errorCode, errorText, networkType, responseTime, msgId);
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onRequestComplete, instanceNum, token, ptr, errorCode, errorText, networkType, responseTime, msgId, dcId);
         if (errorText != nullptr) {
             jniEnv[instanceNum]->DeleteLocalRef(errorText);
         }
@@ -131,6 +148,54 @@ void cancelRequest(JNIEnv *env, jclass c, jint instanceNum, jint token, jboolean
 
 void failNotRunningRequest(JNIEnv *env, jclass c, jint instanceNum, jint token) {
     return ConnectionsManager::getInstance(instanceNum).failNotRunningRequest(token);
+}
+
+void receivedIntegrityCheckClassic(JNIEnv *env, jclass c, jint instanceNum, jint requestToken, jstring nonce, jstring token) {
+    const char* nonceStr = env->GetStringUTFChars(nonce, 0);
+    const char* tokenStr = env->GetStringUTFChars(token, 0);
+    std::string nonceString = nonceStr;
+    std::string tokenString = tokenStr;
+    ConnectionsManager::getInstance(instanceNum).receivedIntegrityCheckClassic(requestToken, nonceString, tokenString);
+    if (nonceStr != nullptr) {
+        env->ReleaseStringUTFChars(nonce, nonceStr);
+    }
+    if (tokenStr != nullptr) {
+        env->ReleaseStringUTFChars(token, tokenStr);
+    }
+}
+
+void receivedCaptchaResult(JNIEnv *env, jclass c, jint instanceNum, jint requestToken, jint generation, jstring token) {
+    // Always resume the request: a missing token is sent as a failure marker,
+    // otherwise the request would stay in awaitingCaptchaCheck forever.
+    std::string tokenString = "RECAPTCHA_FAILED_TOKEN_NULL";
+    if (token != nullptr) {
+        const char *tokenStr = env->GetStringUTFChars(token, nullptr);
+        if (tokenStr != nullptr) {
+            tokenString = tokenStr;
+            env->ReleaseStringUTFChars(token, tokenStr);
+        }
+    }
+    ConnectionsManager::getInstance(instanceNum).receivedCaptchaResult(requestToken, generation, tokenString);
+}
+
+jboolean isGoodPrime(JNIEnv *env, jclass c, jbyteArray prime, jint g) {
+    jsize length = env->GetArrayLength(prime);
+    jbyte *bytes = env->GetByteArrayElements(prime, NULL);
+    if (bytes == NULL) {
+        DEBUG_E("isGoodPrime: failed to get byte array");
+        return false;
+    }
+    unsigned char *unsignedBytes = (unsigned char *)bytes;
+    BIGNUM *bn = BN_bin2bn(unsignedBytes, length, NULL);
+    if (bn == NULL) {
+        env->ReleaseByteArrayElements(prime, bytes, 0);
+        DEBUG_E("isGoodPrime: failed to convert byte array into BIGNUM");
+        return false;
+    }
+    bool result = Handshake::isGoodPrime(bn, g);
+    BN_free(bn);
+    env->ReleaseByteArrayElements(prime, bytes, 0);
+    return result;
 }
 
 void cleanUp(JNIEnv *env, jclass c, jint instanceNum, jboolean resetKeys) {
@@ -203,6 +268,10 @@ void resumeNetwork(JNIEnv *env, jclass c, jint instanceNum, jboolean partial) {
 
 void updateDcSettings(JNIEnv *env, jclass c, jint instanceNum) {
     ConnectionsManager::getInstance(instanceNum).updateDcSettings(0, false, false);
+}
+
+void moveDatacenter(JNIEnv *env, jclass c, jint instanceNum, jint datacenterId) {
+    ConnectionsManager::getInstance(instanceNum).moveToDatacenter(datacenterId);
 }
 
 void setIpStrategy(JNIEnv *env, jclass c, jint instanceNum, jbyte value) {
@@ -324,6 +393,23 @@ class Delegate : public ConnectiosManagerDelegate {
     void onPremiumFloodWait(int32_t instanceNum, int32_t requestToken, bool isUpload) {
         jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onPremiumFloodWait, instanceNum, requestToken, isUpload);
     }
+
+    void onIntegrityCheckClassic(int32_t instanceNum, int32_t requestToken, std::string project, std::string nonce) {
+        jstring projectStr = jniEnv[instanceNum]->NewStringUTF(project.c_str());
+        jstring nonceStr = jniEnv[instanceNum]->NewStringUTF(nonce.c_str());
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onIntegrityCheckClassic, instanceNum, requestToken, projectStr, nonceStr);
+        jniEnv[instanceNum]->DeleteLocalRef(projectStr);
+        jniEnv[instanceNum]->DeleteLocalRef(nonceStr);
+    }
+
+    void onCaptchaCheck(int32_t instanceNum, int32_t requestToken, int32_t generation, std::string action, std::string key_id) {
+        jstring actionStr = jniEnv[instanceNum]->NewStringUTF(action.c_str());
+        jstring keyIdStr = jniEnv[instanceNum]->NewStringUTF(key_id.c_str());
+        jniEnv[instanceNum]->CallStaticVoidMethod(jclass_ConnectionsManager, jclass_ConnectionsManager_onCaptchaCheck, instanceNum, requestToken, generation, actionStr, keyIdStr);
+        jniEnv[instanceNum]->DeleteLocalRef(actionStr);
+        jniEnv[instanceNum]->DeleteLocalRef(keyIdStr);
+    }
+
 };
 
 void onHostNameResolved(JNIEnv *env, jclass c, jstring host, jlong address, jstring ip) {
@@ -436,10 +522,12 @@ static const char *ConnectionsManagerClassPathName = "org/telegram/tgnet/Connect
 static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_getCurrentTimeMillis", "(I)J", (void *) getCurrentTimeMillis},
         {"native_getCurrentTime", "(I)I", (void *) getCurrentTime},
+        {"native_getCurrentPingTime", "(I)I", (void *) getCurrentPingTime},
         {"native_getCurrentDatacenterId", "(I)I", (void *) getCurrentDatacenterId},
+        {"native_getCurrentAuthKeyId", "(I)J", (void *) getCurrentAuthKeyId},
         {"native_isTestBackend", "(I)I", (void *) isTestBackend},
         {"native_getTimeDifference", "(I)I", (void *) getTimeDifference},
-        {"native_sendRequest", "(IJIIIZI)V", (void *) sendRequest},
+        {"native_sendRequest", "(IJIIIZII)V", (void *) sendRequest},
         {"native_cancelRequest", "(IIZ)V", (void *) cancelRequest},
         {"native_cleanUp", "(IZ)V", (void *) cleanUp},
         {"native_cancelRequestsForGuid", "(II)V", (void *) cancelRequestsForGuid},
@@ -456,6 +544,7 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_pauseNetwork", "(I)V", (void *) pauseNetwork},
         {"native_resumeNetwork", "(IZ)V", (void *) resumeNetwork},
         {"native_updateDcSettings", "(I)V", (void *) updateDcSettings},
+        {"native_moveDatacenter", "(II)V", (void *) moveDatacenter},
         {"native_setIpStrategy", "(IB)V", (void *) setIpStrategy},
         {"native_setNetworkAvailable", "(IZIZ)V", (void *) setNetworkAvailable},
         {"native_setPushConnectionEnabled", "(IZ)V", (void *) setPushConnectionEnabled},
@@ -465,7 +554,22 @@ static JNINativeMethod ConnectionsManagerMethods[] = {
         {"native_onHostNameResolved", "(Ljava/lang/String;JLjava/lang/String;)V", (void *) onHostNameResolved},
         {"native_discardConnection", "(III)V", (void *) discardConnection},
         {"native_failNotRunningRequest", "(II)V", (void *) failNotRunningRequest},
+        {"native_receivedIntegrityCheckClassic", "(IILjava/lang/String;Ljava/lang/String;)V", (void *) receivedIntegrityCheckClassic},
+        {"native_receivedCaptchaResult", "(IIILjava/lang/String;)V", (void *) receivedCaptchaResult},
+        {"native_isGoodPrime", "([BI)Z", (void *) isGoodPrime},
 };
+
+
+extern "C"
+JNIEXPORT jboolean JNICALL
+Java_org_telegram_tgnet_ConnectionsManager_native_1test_1AuthAuthorization(JNIEnv *env, jclass clazz, jlong address) {
+    auto *buffer = (NativeByteBuffer *) (intptr_t) address;
+    bool error = false;
+
+    int constructorId = buffer->readInt32(&error);
+    auth_Authorization::TLdeserialize(buffer, constructorId, 0, error);
+    return !error;
+}
 
 inline int registerNativeMethods(JNIEnv *env, const char *className, JNINativeMethod *methods, int methodsCount) {
     jclass clazz;
@@ -509,7 +613,7 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     if (jclass_ConnectionsManager_onRequestClear == 0) {
         return JNI_FALSE;
     }
-    jclass_ConnectionsManager_onRequestComplete = env->GetStaticMethodID(jclass_ConnectionsManager, "onRequestComplete", "(IIJILjava/lang/String;IJJ)V");
+    jclass_ConnectionsManager_onRequestComplete = env->GetStaticMethodID(jclass_ConnectionsManager, "onRequestComplete", "(IIJILjava/lang/String;IJJI)V");
     if (jclass_ConnectionsManager_onRequestComplete == 0) {
         return JNI_FALSE;
     }
@@ -575,6 +679,14 @@ extern "C" int registerNativeTgNetFunctions(JavaVM *vm, JNIEnv *env) {
     }
     jclass_ConnectionsManager_onPremiumFloodWait = env->GetStaticMethodID(jclass_ConnectionsManager, "onPremiumFloodWait", "(IIZ)V");
     if (jclass_ConnectionsManager_onPremiumFloodWait == 0) {
+        return JNI_FALSE;
+    }
+    jclass_ConnectionsManager_onIntegrityCheckClassic = env->GetStaticMethodID(jclass_ConnectionsManager, "onIntegrityCheckClassic", "(IILjava/lang/String;Ljava/lang/String;)V");
+    if (jclass_ConnectionsManager_onIntegrityCheckClassic == 0) {
+        return JNI_FALSE;
+    }
+    jclass_ConnectionsManager_onCaptchaCheck = env->GetStaticMethodID(jclass_ConnectionsManager, "onCaptchaCheck", "(IIILjava/lang/String;Ljava/lang/String;)V");
+    if (jclass_ConnectionsManager_onCaptchaCheck == 0) {
         return JNI_FALSE;
     }
 

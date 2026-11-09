@@ -12,7 +12,7 @@ import android.view.ViewGroup;
 import android.view.Window;
 import android.widget.FrameLayout;
 
-import com.google.android.exoplayer2.util.Log;
+
 
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.ActionBar;
@@ -34,7 +34,6 @@ public class ChatActivityContainer extends FrameLayout {
 
     public ChatActivityContainer(
         Context context,
-        Utilities.Callback0Return<FrameLayout> resizableView,
         INavigationLayout parentLayout,
         Bundle args
     ) {
@@ -50,8 +49,12 @@ public class ChatActivityContainer extends FrameLayout {
                 ChatActivityContainer.this.onSearchLoadingUpdate(loading);
             }
         };
-        chatActivity.insideContainerResizableView = resizableView;
         chatActivity.isInsideContainer = true;
+    }
+
+    private int topPadding;
+    public void setTopPadding(int topPadding) {
+        this.topPadding = topPadding;
     }
 
     protected void onSearchLoadingUpdate(boolean loading) {
@@ -62,6 +65,10 @@ public class ChatActivityContainer extends FrameLayout {
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
 
+        initChatActivity();
+    }
+
+    protected void initChatActivity() {
         if (!chatActivity.onFragmentCreate()) {
             return;
         }
@@ -76,6 +83,9 @@ public class ChatActivityContainer extends FrameLayout {
                 chatActivity.onRemoveFromParent();
                 parent.removeView(fragmentView);
             }
+        }
+        if (chatActivity.getChatListView() != null && topPadding != 0) {
+            chatActivity.getChatListView().setPadding(0, topPadding, 0, 0);
         }
         chatActivity.openedInstantly();
         addView(fragmentView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));

@@ -2,7 +2,6 @@ package org.telegram.ui.Cells;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
 
-import android.app.ApplicationErrorReport;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.drawable.Drawable;
@@ -11,11 +10,9 @@ import android.util.TypedValue;
 import android.view.Gravity;
 import android.widget.FrameLayout;
 import android.widget.LinearLayout;
-import android.widget.Space;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
-import androidx.collection.LongSparseArray;
 
 import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.messenger.AndroidUtilities;
@@ -26,6 +23,7 @@ import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
@@ -34,20 +32,19 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.AnimatedTextView;
-import org.telegram.ui.Components.AvatarDrawable;
-import org.telegram.ui.Components.AvatarsDrawable;
-import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.ClickableAnimatedTextView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LoadingDrawable;
-import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Stories.StoriesController;
 import org.telegram.ui.Stories.StoriesListPlaceProvider;
 
 import java.util.ArrayList;
+import java.util.Collections;
+import java.util.Comparator;
+import java.util.HashSet;
 
-public class ProfileChannelCell extends FrameLayout {
+public class ProfileChannelCell extends FrameLayout implements Theme.Colorable {
 
     private final Theme.ResourcesProvider resourcesProvider;
 
@@ -63,25 +60,25 @@ public class ProfileChannelCell extends FrameLayout {
 
         LinearLayout headerLayout = new LinearLayout(context);
         headerLayout.setOrientation(LinearLayout.HORIZONTAL);
-        addView(headerLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.FILL_HORIZONTAL | Gravity.TOP, 22, 16.6f, 22, 0));
+        addView(headerLayout, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.FILL_HORIZONTAL | Gravity.TOP, 16.66f, 11.6f, 16.66f, 0));
 
         headerView = new TextView(context);
-        headerView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
-        headerView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
+        headerView.setTypeface(AndroidUtilities.bold());
+        headerView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         headerView.setText(LocaleController.getString(R.string.ProfileChannel));
         headerLayout.addView(headerView, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.TOP));
 
         subscribersView = new ClickableAnimatedTextView(context);
         subscribersView.getDrawable().setHacks(true, true, true);
         subscribersView.setAnimationProperties(.3f, 0, 165, CubicBezierInterpolator.EASE_OUT_QUINT);
-        subscribersView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        subscribersView.setTypeface(AndroidUtilities.bold());
         subscribersView.setTextSize(dp(11));
         subscribersView.setPadding(dp(4.33f), 0, dp(4.33f), 0);
         subscribersView.setGravity(Gravity.LEFT);
-        headerLayout.addView(subscribersView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 17, Gravity.LEFT | Gravity.TOP, 4, 2, 4, 0));
+        headerLayout.addView(subscribersView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, 17, Gravity.LEFT | Gravity.TOP, 4, 1, 4, 0));
 
         dialogCell = new DialogCell(null, context, false, true, UserConfig.selectedAccount, resourcesProvider);
-        dialogCell.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        dialogCell.setBackgroundColor(0);
         dialogCell.setDialogCellDelegate(new DialogCell.DialogCellDelegate() {
             @Override
             public void onButtonClicked(DialogCell dialogCell) {
@@ -140,8 +137,8 @@ public class ProfileChannelCell extends FrameLayout {
 
         loadingDrawable = new LoadingDrawable();
         loadingDrawable.setColors(
-            Theme.multAlpha(Theme.getColor(Theme.key_listSelector, resourcesProvider), 1.25f),
-            Theme.multAlpha(Theme.getColor(Theme.key_listSelector, resourcesProvider), .8f)
+                Theme.multAlpha(Theme.getColor(Theme.key_listSelector, resourcesProvider), 1.25f),
+                Theme.multAlpha(Theme.getColor(Theme.key_listSelector, resourcesProvider), .8f)
         );
         loadingDrawable.setRadiiDp(8);
     }
@@ -195,8 +192,7 @@ public class ProfileChannelCell extends FrameLayout {
     }
 
     private boolean set = false;
-
-    public void set(TLRPC.Chat channel, MessageObject messageObject) {
+    public void set(TLRPC.Chat channel, ArrayList<MessageObject> messageObjects) {
         final boolean animated = set;
         final boolean subscribersShown = channel == null || channel.participants_count > 0;
         subscribersView.cancelAnimation();
@@ -215,10 +211,11 @@ public class ProfileChannelCell extends FrameLayout {
             String shortNumber = ignoreShort ? String.valueOf(result[0] = channel.participants_count) : LocaleController.formatShortNumber(channel.participants_count, result);
             subscribersView.setText(LocaleController.formatPluralString("Subscribers", result[0]).replace(String.format("%d", result[0]), shortNumber), true);
 
-            if (loading = (messageObject == null)) {
+            if (loading = (messageObjects == null || messageObjects.isEmpty())) {
                 dialogCell.setDialog(-channel.id, null, 0, false, animated);
             } else {
-                dialogCell.setDialog(-channel.id, messageObject, messageObject.messageOwner.date, false, animated);
+                final MessageObject lastMessage = messageObjects.get(messageObjects.size() - 1);
+                dialogCell.setDialog(-channel.id, lastMessage, messageObjects, lastMessage.messageOwner.date, false, animated);
             }
         }
 
@@ -233,7 +230,7 @@ public class ProfileChannelCell extends FrameLayout {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(115.66f), MeasureSpec.EXACTLY));
+        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(102), MeasureSpec.EXACTLY));
     }
 
 
@@ -241,7 +238,7 @@ public class ProfileChannelCell extends FrameLayout {
 
         public final int currentAccount;
         public boolean loading, loaded, error;
-        public MessageObject messageObject;
+        public ArrayList<MessageObject> messageObjects = new ArrayList<>();
 
         public ChannelMessageFetcher(int currentAccount) {
             this.currentAccount = currentAccount;
@@ -255,7 +252,7 @@ public class ProfileChannelCell extends FrameLayout {
             if (userInfo == null || (userInfo.flags2 & 64) == 0) {
                 searchId++;
                 loaded = true;
-                messageObject = null;
+                messageObjects.clear();
                 done(false);
                 return;
             }
@@ -266,7 +263,7 @@ public class ProfileChannelCell extends FrameLayout {
             if (loaded || loading) {
                 if (this.channel_id != channel_id || this.message_id != message_id) {
                     loaded = false;
-                    messageObject = null;
+                    messageObjects.clear();
                 } else {
                     return;
                 }
@@ -280,35 +277,35 @@ public class ProfileChannelCell extends FrameLayout {
             final long selfId = UserConfig.getInstance(currentAccount).getClientUserId();
             MessagesStorage storage = MessagesStorage.getInstance(currentAccount);
             storage.getStorageQueue().postRunnable(() -> {
-                TLRPC.Message message = null;
+                ArrayList<TLRPC.Message> messages = new ArrayList<>();
                 ArrayList<TLRPC.User> users = new ArrayList<>();
                 ArrayList<TLRPC.Chat> chats = new ArrayList<>();
                 SQLiteCursor cursor = null;
                 try {
                     if (message_id <= 0) {
-                        cursor = storage.getDatabase().queryFinalized("SELECT data, mid FROM messages_v2 WHERE uid = ? ORDER BY mid DESC LIMTI 1", -channel_id);
+                        cursor = storage.getDatabase().queryFinalized("SELECT data, mid FROM messages_v2 WHERE uid = ? ORDER BY mid DESC LIMIT 10", -channel_id);
                     } else {
-                        cursor = storage.getDatabase().queryFinalized("SELECT data, mid FROM messages_v2 WHERE uid = ? AND mid = ? LIMIT 1", -channel_id, message_id);
+                        cursor = storage.getDatabase().queryFinalized("SELECT data, mid FROM messages_v2 WHERE uid = ? AND mid <= ? ORDER BY mid DESC LIMIT 10", -channel_id, message_id);
                     }
                     ArrayList<Long> usersToLoad = new ArrayList<>();
                     ArrayList<Long> chatsToLoad = new ArrayList<>();
-                    if (cursor.next()) {
+                    while (cursor.next()) {
                         NativeByteBuffer data = cursor.byteBufferValue(0);
                         if (data != null) {
-                            message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
+                            final TLRPC.Message message = TLRPC.Message.TLdeserialize(data, data.readInt32(false), false);
                             message.readAttachPath(data, selfId);
                             data.reuse();
                             message.id = cursor.intValue(1);
                             message.dialog_id = -channel_id;
                             MessagesStorage.addUsersAndChatsFromMessage(message, usersToLoad, chatsToLoad, null);
+                            messages.add(message);
                         }
                     }
                     cursor.dispose();
 
-                    if (message != null) {
-
+                    if (!messages.isEmpty()) {
                         if (!usersToLoad.isEmpty()) {
-                            storage.getUsersInternal(TextUtils.join(",", usersToLoad), users);
+                            storage.getUsersInternal(usersToLoad, users);
                         }
                         if (!chatsToLoad.isEmpty()) {
                             storage.getChatsInternal(TextUtils.join(",", chatsToLoad), chats);
@@ -321,47 +318,64 @@ public class ProfileChannelCell extends FrameLayout {
                         cursor.dispose();
                     }
                 }
-                final TLRPC.Message finalMessage = message;
                 AndroidUtilities.runOnUIThread(() -> {
                     if (thisSearchId != searchId) return;
-                    MessageObject messageObject1 = null;
-                    if (finalMessage != null) {
-                        messageObject1 = new MessageObject(currentAccount, finalMessage, true, true);
+                    if (!messages.isEmpty()) {
+                        messageObjects.clear();
+                        Collections.sort(messages, Comparator.comparingInt(msg -> msg.id));
+                        final TLRPC.Message lastMessage = messages.get(messages.size() - 1);
+                        final long grouped_id = lastMessage.grouped_id;
+                        if (grouped_id != 0) {
+                            for (TLRPC.Message message : messages) {
+                                if (message.grouped_id == grouped_id) {
+                                    messageObjects.add(new MessageObject(currentAccount, message, false, true));
+                                }
+                            }
+                        } else {
+                            messageObjects.add(new MessageObject(currentAccount, lastMessage, false, true));
+                        }
+
+                        if (!messageObjects.isEmpty()) {
+                            done(false);
+                            return;
+                        }
                     }
 
-                    if (messageObject1 != null) {
-                        this.messageObject = messageObject1;
-                        done(false);
-                        return;
-                    }
-
-                    TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
+                    final TLRPC.TL_channels_getMessages req = new TLRPC.TL_channels_getMessages();
                     req.channel = MessagesController.getInstance(currentAccount).getInputChannel(channel_id);
-                    req.id.add(message_id);
+                    for (int i = 10; i >= 0; --i) {
+                        final int id = message_id - i;
+                        if (id >= 0)
+                            req.id.add(id);
+                    }
                     ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, err) -> AndroidUtilities.runOnUIThread(() -> {
                         if (response instanceof TLRPC.messages_Messages) {
-                            TLRPC.messages_Messages res = (TLRPC.messages_Messages) response;
+                            final TLRPC.messages_Messages res = (TLRPC.messages_Messages) response;
                             MessagesController.getInstance(currentAccount).putUsers(res.users, false);
                             MessagesController.getInstance(currentAccount).putChats(res.chats, false);
                             storage.putUsersAndChats(res.users, res.chats, true, true);
-                            storage.putMessages(res, -channel_id, -1, 0, false, 0, 0);
+                            storage.putMessages(res, -channel_id, MessagesController.LOAD_AROUND_MESSAGE, 0, false, 0, 0);
 
                             if (thisSearchId != searchId) return;
 
-                            TLRPC.Message message1 = null;
-                            for (TLRPC.Message m : res.messages) {
-                                if (m.id == message_id) {
-                                    message1 = m;
-                                    break;
-                                }
-                            }
-                            if (message1 != null) {
-                                if (message1 instanceof TLRPC.TL_messageEmpty) {
-                                    this.messageObject = null;
+                            if (!res.messages.isEmpty()) {
+                                messageObjects.clear();
+                                Collections.sort(messages, Comparator.comparingInt(msg -> msg.id));
+                                final TLRPC.Message lastMessage = res.messages.get(res.messages.size() - 1);
+                                final long grouped_id = lastMessage.grouped_id;
+                                if (grouped_id != 0) {
+                                    for (TLRPC.Message message : res.messages) {
+                                        if (message.grouped_id == grouped_id) {
+                                            messageObjects.add(new MessageObject(currentAccount, message, false, true));
+                                        }
+                                    }
                                 } else {
-                                    this.messageObject = new MessageObject(currentAccount, message1, true, true);
+                                    messageObjects.add(new MessageObject(currentAccount, lastMessage, false, true));
                                 }
-                                done(false);
+
+                                if (!messageObjects.isEmpty()) {
+                                    done(false);
+                                }
                             }
                         } else {
                             if (thisSearchId != searchId) return;
@@ -373,6 +387,7 @@ public class ProfileChannelCell extends FrameLayout {
         }
 
         private ArrayList<Runnable> callbacks = new ArrayList<>();
+
         public void subscribe(Runnable callback) {
             if (loaded) {
                 callback.run();
@@ -380,6 +395,7 @@ public class ProfileChannelCell extends FrameLayout {
                 callbacks.add(callback);
             }
         }
+
         private void done(boolean error) {
             loading = false;
             loaded = true;
@@ -393,13 +409,16 @@ public class ProfileChannelCell extends FrameLayout {
         return color;
     }
 
+    @Override
     public void updateColors() {
         final int headerColor = processColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlueHeader, resourcesProvider));
         subscribersView.setTextColor(headerColor);
-        subscribersView.setBackground(Theme.createRoundRectDrawable(dp(4.5f), dp(4.5f), Theme.multAlpha(headerColor, .1f)));
+        subscribersView.setBackground(Theme.createRoundRectDrawable(dp(9f), dp(9f), Theme.multAlpha(headerColor, .1f)));
         headerView.setTextColor(headerColor);
-//        titleView.setTextColor(Theme.getColor(Theme.key_chats_name, resourcesProvider));
-//        dateView.setTextColor(Theme.getColor(Theme.key_chats_date, resourcesProvider));
+    }
+    @Override
+    public void addColorKeys(HashSet<Integer> colors) {
+        colors.add(Theme.key_windowBackgroundWhiteBlueHeader);
     }
 
 }

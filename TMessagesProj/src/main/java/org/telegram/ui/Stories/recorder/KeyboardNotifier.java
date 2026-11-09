@@ -8,23 +8,34 @@ import android.view.ViewTreeObserver;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Size;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
 
+@Deprecated(since = "use insets listener !!!")
 public class KeyboardNotifier {
 
     private final View rootView;
+    private View realRootView;
     private final Utilities.Callback<Integer> listener;
     public boolean ignoring;
     private boolean awaitingKeyboard;
+    private boolean mUseInsets;
+    private boolean mMinusNavBar;
 
     private final Rect rect = new Rect();
 
     public KeyboardNotifier(@NonNull View rootView, Utilities.Callback<Integer> listener) {
+        this(rootView, false, listener);
+    }
+
+    public KeyboardNotifier(@NonNull View rootView, boolean getRootView, Utilities.Callback<Integer> listener) {
         this.rootView = rootView;
         this.listener = listener;
+        realRootView = rootView;
 
         if (this.rootView.isAttachedToWindow()) {
             rootView.getViewTreeObserver().addOnGlobalLayoutListener(onGlobalLayoutListener);
@@ -33,6 +44,9 @@ public class KeyboardNotifier {
         this.rootView.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
             @Override
             public void onViewAttachedToWindow(@NonNull View v) {
+                if (getRootView) {
+                    realRootView = v.getRootView();
+                }
                 rootView.getViewTreeObserver().addOnGlobalLayoutListener(onGlobalLayoutListener);
                 rootView.addOnLayoutChangeListener(onLayoutChangeListener);
             }
@@ -43,6 +57,16 @@ public class KeyboardNotifier {
                 rootView.removeOnLayoutChangeListener(onLayoutChangeListener);
             }
         });
+    }
+
+    public KeyboardNotifier useInsets() {
+        mUseInsets = true;
+        return this;
+    }
+
+    public KeyboardNotifier useMinusNavbar() {
+        mMinusNavBar = true;
+        return this;
     }
 
     private final View.OnLayoutChangeListener onLayoutChangeListener = (view, l, t, r, b, ol, ot, or, ob) -> update();
@@ -56,9 +80,18 @@ public class KeyboardNotifier {
             return;
         }
 
-        rootView.getWindowVisibleDisplayFrame(rect);
-        final int screenHeight = rootView.getHeight();
-        keyboardHeight = screenHeight - rect.bottom;
+        if (mUseInsets) {
+            final WindowInsetsCompat insets = ViewCompat.getRootWindowInsets(realRootView == null ? rootView : realRootView);
+            keyboardHeight = insets != null ? insets.getInsets(WindowInsetsCompat.Type.ime()).bottom : 0;
+        } else {
+            rootView.getWindowVisibleDisplayFrame(rect);
+            final int screenHeight = (realRootView == null ? rootView : realRootView).getHeight();
+            keyboardHeight = screenHeight - rect.bottom;
+        }
+        if (mMinusNavBar) {
+            keyboardHeight = Math.max(0, keyboardHeight - AndroidUtilities.navigationBarHeight);
+        }
+
         final boolean unique = lastKeyboardHeight != keyboardHeight;
         lastKeyboardHeight = keyboardHeight;
 

@@ -5,12 +5,12 @@ import static org.telegram.messenger.AndroidUtilities.dp;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.drawable.Drawable;
 import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
+import android.text.TextUtils;
 import android.view.Gravity;
 import android.view.View;
 import android.widget.FrameLayout;
@@ -22,6 +22,7 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AvatarDrawable;
 import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.ColoredImageSpan;
@@ -38,7 +39,7 @@ public abstract class BaseCell extends FrameLayout {
     protected final BackupImageView imageView;
 
     protected final SimpleTextView titleTextView;
-    protected final SimpleTextView subtitleTextView;
+    public final SimpleTextView subtitleTextView;
 
     protected final RadioButton radioButton;
 
@@ -53,7 +54,7 @@ public abstract class BaseCell extends FrameLayout {
 
         backgroundView = new View(context);
         addView(backgroundView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        backgroundView.setBackgroundColor(Theme.getColor(Theme.key_dialogBackground, resourcesProvider));
+        ThemeBind.backgroundColor(backgroundView, Theme.key_dialogBackground, resourcesProvider);
 
         avatarDrawable.setRoundRadius(AndroidUtilities.dp(40));
 
@@ -64,26 +65,26 @@ public abstract class BaseCell extends FrameLayout {
         titleTextView = new SimpleTextView(context) {
             @Override
             public boolean setText(CharSequence value) {
-                value = Emoji.replaceEmoji(value, getPaint().getFontMetricsInt(), AndroidUtilities.dp(15), false);
+                value = Emoji.replaceEmoji(value, getPaint().getFontMetricsInt(), false);
                 return super.setText(value);
             }
         };
         NotificationCenter.listenEmojiLoading(titleTextView);
         NotificationCenter.listenEmojiLoading(imageView);
         titleTextView.setTextSize(16);
-        titleTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(titleTextView, Theme.key_dialogTextBlack, resourcesProvider);
         titleTextView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
         addView(titleTextView);
 
         subtitleTextView = new SimpleTextView(context);
         subtitleTextView.setTextSize(14);
-        subtitleTextView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack, resourcesProvider));
+        ThemeBind.textColor(subtitleTextView, Theme.key_dialogTextBlack, resourcesProvider);
         subtitleTextView.setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
         addView(subtitleTextView);
 
         radioButton = new RadioButton(context);
         radioButton.setSize(AndroidUtilities.dp(20));
-        radioButton.setColor(Theme.getColor(Theme.key_checkboxDisabled, resourcesProvider), Theme.getColor(Theme.key_dialogRadioBackgroundChecked, resourcesProvider));
+        ThemeBind.radioColors(radioButton, Theme.key_checkboxDisabled, Theme.key_dialogRadioBackgroundChecked, resourcesProvider);
         addView(radioButton);
 
         updateLayouts();
@@ -132,8 +133,8 @@ public abstract class BaseCell extends FrameLayout {
         return finalText;
     }
 
-    protected void setSubtitle(CharSequence text) {
-        if (text == null) {
+    public void setSubtitle(CharSequence text) {
+        if (TextUtils.isEmpty(text)) {
             titleTextView.setTranslationY(0);
             subtitleTextView.setVisibility(View.GONE);
         } else {

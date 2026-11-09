@@ -26,6 +26,7 @@ import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
@@ -75,7 +76,7 @@ public class StealthModeAlert extends BottomSheet {
 
         ImageView imageView = new ImageView(getContext());
         imageView.setScaleType(ImageView.ScaleType.CENTER_INSIDE);
-        imageView.setBackground(Theme.createCircleDrawable(AndroidUtilities.dp(80), Theme.getColor(Theme.key_featuredStickers_addButton)));
+        ThemeBind.fillBackground(imageView, Theme.createCircleDrawable(AndroidUtilities.dp(80), Theme.getColor(Theme.key_featuredStickers_addButton)), ThemeBind.of(Theme.key_featuredStickers_addButton));
         imageView.setImageResource(R.drawable.large_stealth);
         frameLayout.addView(imageView, LayoutHelper.createFrame(80, 80, Gravity.CENTER_HORIZONTAL, 0, 18, 0, 0));
 
@@ -85,35 +86,35 @@ public class StealthModeAlert extends BottomSheet {
 
         TextView title = new TextView(getContext());
         title.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-        title.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        title.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
-        title.setText(LocaleController.getString("StealthModeTitle", R.string.StealthModeTitle));
+        title.setTypeface(AndroidUtilities.bold());
+        ThemeBind.textColor(title, Theme.key_windowBackgroundWhiteBlackText, resourcesProvider);
+        title.setText(LocaleController.getString(R.string.StealthModeTitle));
         linearLayout.addView(title, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL));
 
         SimpleTextView subtitle = new SimpleTextView(getContext());
         subtitle.setTextSize(14);
         subtitle.setAlignment(Layout.Alignment.ALIGN_CENTER);
         subtitle.setMaxLines(100);
-        subtitle.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
+        ThemeBind.textColor(subtitle, Theme.key_windowBackgroundWhiteGrayText, resourcesProvider);
         if (UserConfig.getInstance(currentAccount).isPremium()) {
-            subtitle.setText(LocaleController.getString("StealthModeHint", R.string.StealthModeHint));
+            subtitle.setText(LocaleController.getString(R.string.StealthModeHint));
         } else {
-            subtitle.setText(LocaleController.getString("StealthModePremiumHint", R.string.StealthModePremiumHint));
+            subtitle.setText(LocaleController.getString(R.string.StealthModePremiumHint));
         }
         linearLayout.addView(subtitle, LayoutHelper.createLinear(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 36, 10, 36, 0));
 
         ItemCell itemCell = new ItemCell(getContext());
         itemCell.imageView.setImageResource(R.drawable.msg_stealth_5min);
-        itemCell.textView.setText(LocaleController.getString("HideRecentViews", R.string.HideRecentViews));
-        itemCell.description.setText(LocaleController.getString("HideRecentViewsDescription", R.string.HideRecentViewsDescription));
+        itemCell.textView.setText(LocaleController.getString(R.string.HideRecentViews));
+        itemCell.description.setText(LocaleController.getString(R.string.HideRecentViewsDescription));
 
         linearLayout.addView(itemCell, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,0, 0, 20, 0, 0));
 
 
         ItemCell itemCell2 = new ItemCell(getContext());
         itemCell2.imageView.setImageResource(R.drawable.msg_stealth_25min);
-        itemCell2.textView.setText(LocaleController.getString("HideNextViews", R.string.HideNextViews));
-        itemCell2.description.setText(LocaleController.getString("HideNextViewsDescription", R.string.HideNextViewsDescription));
+        itemCell2.textView.setText(LocaleController.getString(R.string.HideNextViews));
+        itemCell2.description.setText(LocaleController.getString(R.string.HideNextViewsDescription));
 
         linearLayout.addView(itemCell2, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT,0, 0, 10, 0, 0));
 
@@ -125,7 +126,7 @@ public class StealthModeAlert extends BottomSheet {
         TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser();
         if (!user.premium) {
             button.setIcon(R.raw.unlock_icon);
-            button.setButton(LocaleController.getString("UnlockStealthMode", R.string.UnlockStealthMode), v -> {
+            button.setButton(LocaleController.getString(R.string.UnlockStealthMode), v -> {
                 dismiss();
                 BaseFragment baseFragment = LaunchActivity.getLastFragment();
                 if (baseFragment != null) {
@@ -171,7 +172,9 @@ public class StealthModeAlert extends BottomSheet {
                     ConnectionsManager.getInstance(currentAccount).sendRequest(req, (response, error) -> AndroidUtilities.runOnUIThread(() -> {
 
                     }));
-                    containerView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                    try {
+                        containerView.performHapticFeedback(HapticFeedbackConstants.KEYBOARD_TAP);
+                    } catch (Exception ignored) {}
                     dismiss();
                     if (type == TYPE_FROM_STORIES) {
                         showStealthModeEnabledBulletin();
@@ -188,7 +191,7 @@ public class StealthModeAlert extends BottomSheet {
                     BulletinFactory factory = BulletinFactory.of(container, resourcesProvider);
                     if (factory != null) {
                         factory.createErrorBulletin(
-                                AndroidUtilities.replaceTags(LocaleController.getString("StealthModeCooldownHint", R.string.StealthModeCooldownHint))
+                                AndroidUtilities.replaceTags(LocaleController.getString(R.string.StealthModeCooldownHint))
                         ).show(true);
                     }
                 }
@@ -210,8 +213,8 @@ public class StealthModeAlert extends BottomSheet {
         }
         if (factory != null) {
             factory.createSimpleLargeBulletin(R.drawable.msg_stories_stealth2,
-                    LocaleController.getString("StealthModeOn", R.string.StealthModeOn),
-                    LocaleController.getString("StealthModeOnHint", R.string.StealthModeOnHint)
+                    LocaleController.getString(R.string.StealthModeOn),
+                    LocaleController.getString(R.string.StealthModeOnHint)
             ).show();
         }
     }
@@ -227,15 +230,15 @@ public class StealthModeAlert extends BottomSheet {
         TL_stories.TL_storiesStealthMode stealthMode = storiesController.getStealthMode();
         if (stealthMode != null && ConnectionsManager.getInstance(currentAccount).getCurrentTime() < stealthMode.active_until_date) {
             stealthModeIsActive = true;
-            button.setOverlayText(LocaleController.getString("StealthModeIsActive", R.string.StealthModeIsActive), true, animated);
-            button.overlayTextView.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
+            button.setOverlayText(LocaleController.getString(R.string.StealthModeIsActive), true, animated);
+            ThemeBind.textColor(button.overlayTextView, Theme.key_featuredStickers_buttonText);
         } else if (stealthMode == null || ConnectionsManager.getInstance(currentAccount).getCurrentTime() > stealthMode.cooldown_until_date) {
             if (type == TYPE_FROM_STORIES) {
-                button.setOverlayText(LocaleController.getString("EnableStealthMode", R.string.EnableStealthMode), true, animated);
+                button.setOverlayText(LocaleController.getString(R.string.EnableStealthMode), true, animated);
             } else if (type == TYPE_FROM_DIALOGS) {
                 button.setOverlayText(LocaleController.getString(R.string.EnableStealthModeAndOpenStory), true, animated);
             }
-            button.overlayTextView.setTextColor(Theme.getColor(Theme.key_featuredStickers_buttonText));
+            ThemeBind.textColor(button.overlayTextView, Theme.key_featuredStickers_buttonText);
         } else {
             long timeLeft = stealthMode.cooldown_until_date - ConnectionsManager.getInstance(currentAccount).getCurrentTime();
             int s = (int) ((timeLeft) % 60);
@@ -243,7 +246,7 @@ public class StealthModeAlert extends BottomSheet {
             int h = (int) ((timeLeft / 60 / 60));
             String time = String.format(Locale.ENGLISH, "%02d", h) + String.format(Locale.ENGLISH, ":%02d", m) + String.format(Locale.ENGLISH, ":%02d", s);
             button.setOverlayText(LocaleController.formatString("AvailableIn", R.string.AvailableIn, time), true, animated);
-            button.overlayTextView.setTextColor(ColorUtils.setAlphaComponent(Theme.getColor(Theme.key_featuredStickers_buttonText), 125));
+            ThemeBind.textColor(button.overlayTextView, ThemeBind.alpha(Theme.key_featuredStickers_buttonText, 125));
             AndroidUtilities.cancelRunOnUIThread(updateButtonRunnuble);
             AndroidUtilities.runOnUIThread(updateButtonRunnuble, 1000);
         }
@@ -258,17 +261,17 @@ public class StealthModeAlert extends BottomSheet {
         public ItemCell(Context context) {
             super(context);
             imageView = new ImageView(context);
-            imageView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_featuredStickers_addButton), PorterDuff.Mode.MULTIPLY));
+            ThemeBind.colorFilter(imageView, Theme.key_featuredStickers_addButton, PorterDuff.Mode.MULTIPLY);
             addView(imageView, LayoutHelper.createFrame(28, 28, 0, 25, 12, 16, 0));
 
             textView = new TextView(context);
-            textView.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-            textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
+            textView.setTypeface(AndroidUtilities.bold());
+            ThemeBind.textColor(textView, Theme.key_windowBackgroundWhiteBlackText, resourcesProvider);
             textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 68, 8, 16, 0));
 
             description = new TextView(context);
-            description.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText, resourcesProvider));
+            ThemeBind.textColor(description, Theme.key_windowBackgroundWhiteGrayText, resourcesProvider);
             description.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
             addView(description, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 68, 28, 16, 8));
         }

@@ -10,7 +10,7 @@ import android.view.animation.OvershootInterpolator;
 
 public class ButtonBounce {
 
-    private View view;
+    public View view;
     private final float durationPressMultiplier;
     private final float durationReleaseMultiplier;
     private final float overshoot;
@@ -26,11 +26,20 @@ public class ButtonBounce {
         this.overshoot = overshoot;
     }
 
+    public View getView() {
+        return view;
+    }
+
     public ButtonBounce(View viewToInvalidate, float durationPressMultiplier, float durationReleaseMultiplier, float overshoot) {
         view = viewToInvalidate;
         this.durationPressMultiplier = durationPressMultiplier;
         this.durationReleaseMultiplier = durationReleaseMultiplier;
         this.overshoot = overshoot;
+    }
+
+    private Runnable additionalInvalidate;
+    public void setAdditionalInvalidate(Runnable additionalInvalidate) {
+        this.additionalInvalidate = additionalInvalidate;
     }
 
     public ButtonBounce setReleaseDelay(long releaseDelay) {
@@ -43,6 +52,8 @@ public class ButtonBounce {
     }
 
     private ValueAnimator animator;
+    private ValueAnimator bounceAnimator;
+    private float bounceScale = 1f;
     private boolean isPressed;
     private float pressedT;
 
@@ -82,12 +93,36 @@ public class ButtonBounce {
         }
     }
 
+    public void bounce() {
+        if (bounceAnimator != null) {
+            bounceAnimator.cancel();
+        }
+        bounceAnimator = ValueAnimator.ofFloat(.9f, 1f);
+        bounceAnimator.addUpdateListener(anm -> {
+            bounceScale = (float) anm.getAnimatedValue();
+            invalidate();
+        });
+        bounceAnimator.addListener(new AnimatorListenerAdapter() {
+            @Override
+            public void onAnimationEnd(Animator animation) {
+                if (animation == bounceAnimator) {
+                    bounceAnimator = null;
+                    bounceScale = 1f;
+                    invalidate();
+                }
+            }
+        });
+        bounceAnimator.setDuration(320);
+        bounceAnimator.setInterpolator(new OvershootInterpolator());
+        bounceAnimator.start();
+    }
+
     public float isPressedProgress() {
         return pressedT;
     }
 
     public float getScale(float diff) {
-        return (1f - diff) + diff * (1f - pressedT);
+        return ((1f - diff) + diff * (1f - pressedT)) * bounceScale;
     }
 
     public boolean isPressed() {
@@ -97,6 +132,9 @@ public class ButtonBounce {
     public void invalidate() {
         if (view != null) {
             view.invalidate();
+        }
+        if (additionalInvalidate != null) {
+            additionalInvalidate.run();
         }
     }
 

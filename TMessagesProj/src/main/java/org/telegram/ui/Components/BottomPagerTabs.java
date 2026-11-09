@@ -22,8 +22,6 @@ import androidx.annotation.NonNull;
 import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.LocaleController;
-import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.Theme;
 
@@ -59,21 +57,23 @@ public class BottomPagerTabs extends View {
             customEndFrameMid = endFrameMid;
             customEndFrameEnd = endFrameEnd;
 
-            drawable = new RLottieDrawable(resId, "" + resId, dp(29), dp(29));
+            drawable = new RLottieDrawable(resId, dp(29), dp(29));
             drawable.setMasterParent(BottomPagerTabs.this);
             drawable.setAllowDecodeSingleFrame(true);
             drawable.setPlayInDirectionOfCustomEndFrame(true);
             drawable.setAutoRepeat(0);
 
-            paint.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+            paint.setTypeface(AndroidUtilities.bold());
             paint.setTextSize(dp(12));
             paint.setColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
             layout = new StaticLayout(text, paint, AndroidUtilities.displaySize.x, Layout.Alignment.ALIGN_NORMAL, 1f, 0f, false);
             layoutWidth = layout.getLineCount() > 0 ? layout.getLineWidth(0) : 0;
             layoutLeft = layout.getLineCount() > 0 ? layout.getLineLeft(0) : 0;
 
-            ripple = Theme.createSelectorDrawable(Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider), .1f), Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(16));
+            ripple = Theme.createSelectorDrawable(rippleColor = Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider), .1f), Theme.RIPPLE_MASK_ROUNDRECT_6DP, dp(16));
         }
+
+        private int rippleColor;
 
         private boolean active;
         public void setActive(boolean active, boolean animated) {
@@ -216,6 +216,11 @@ public class BottomPagerTabs extends View {
                 canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(16), dp(16), selectPaint);
             }
 
+            final int rippleColor = Theme.multAlpha(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider), .1f);
+            if (tab.rippleColor != rippleColor) {
+                // follow theme changes
+                Theme.setSelectorDrawableColor(tab.ripple, tab.rippleColor = rippleColor, true);
+            }
             tab.ripple.setBounds(AndroidUtilities.rectTmp2);
             tab.ripple.draw(canvas);
 

@@ -3,7 +3,6 @@ package org.telegram.ui;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Canvas;
-import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.View;
@@ -13,6 +12,7 @@ import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 import androidx.recyclerview.widget.DefaultItemAnimator;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
@@ -24,9 +24,11 @@ import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_stars;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Cells.AvailableReactionCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
@@ -43,7 +45,6 @@ import java.util.List;
 
 public class ReactionsDoubleTapManageActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
-    private LinearLayout contentView;
     private RecyclerListView listView;
     private RecyclerView.Adapter listAdapter;
 
@@ -57,20 +58,35 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
         super();
     }
 
+    private NotificationCenter.ObserversGroup observersGroup;
+
     @Override
     public boolean onFragmentCreate() {
-        getNotificationCenter().addObserver(this, NotificationCenter.reactionsDidLoad);
-        getNotificationCenter().addObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
+        if (observersGroup != null) {
+            observersGroup.removeAllObservers();
+            observersGroup = null;
+        }
+
+        observersGroup = getNotificationCenter()
+            .createObserversGroup(this)
+            .add(NotificationCenter.reactionsDidLoad)
+            .add(NotificationCenter.currentUserPremiumStatusChanged);
+
         return super.onFragmentCreate();
     }
 
     @Override
-    public View createView(Context context) {
-        actionBar.setTitle(LocaleController.getString("Reactions", R.string.Reactions));
-        actionBar.setBackButtonImage(R.drawable.ic_ab_back);
-        actionBar.setAllowOverlayTitle(true);
+    protected boolean useSimpleActionBar() {
+        return true;
+    }
 
-        actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
+    @Override
+    public View createView(Context context) {
+        setHasOwnBackground(true);
+        simpleActionBar.setTitle(LocaleController.getString(R.string.Reactions));
+        simpleActionBar.setBackButtonImage(R.drawable.ic_ab_back);
+
+        simpleActionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
@@ -79,10 +95,11 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
             }
         });
 
-        LinearLayout linaerLayout = new LinearLayout(context);
-        linaerLayout.setOrientation(LinearLayout.VERTICAL);
+        final FrameLayout frameLayout = new FrameLayout(context);
 
         listView = new RecyclerListView(context);
+        listView.setSections();
+        listView.setSectionsDrawBackground(true);
         ((DefaultItemAnimator)listView.getItemAnimator()).setSupportsChangeAnimations(false);
         listView.setLayoutManager(new LinearLayoutManager(context));
         listView.setAdapter(listAdapter = new RecyclerListView.SelectionAdapter() {
@@ -98,16 +115,13 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
                 switch (viewType) {
                     case 0:
                         ThemePreviewMessagesCell messagesCell = new ThemePreviewMessagesCell(context, parentLayout, ThemePreviewMessagesCell.TYPE_REACTIONS_DOUBLE_TAP);
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                            messagesCell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-                        }
+                        messagesCell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
                         messagesCell.fragment = ReactionsDoubleTapManageActivity.this;
                         view = messagesCell;
                         break;
                     case 2:
                         TextInfoPrivacyCell cell = new TextInfoPrivacyCell(context);
-                        cell.setText(LocaleController.getString("DoubleTapPreviewRational", R.string.DoubleTapPreviewRational));
-                        cell.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider, Theme.key_windowBackgroundGrayShadow));
+                        cell.setText(LocaleController.getString(R.string.DoubleTapPreviewRational));
                         view = cell;
                         break;
                     case 3:
@@ -125,7 +139,7 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
                                 );
                             }
                         };
-                        view.setBackground(Theme.getThemedDrawableByKey(context, R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                        view.setTag(RecyclerListView.TAG_NOT_SECTION);
                         break;
                     default:
                     case 1: {
@@ -182,29 +196,26 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
                 showSelectStatusDialog((SetDefaultReactionCell) view);
             }
         });
-        linaerLayout.addView(listView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
-        fragmentView = contentView = linaerLayout;
+        frameLayout.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
+        fragmentView = frameLayout;
         updateColors();
         updateRows();
 
-        return contentView;
+        return frameLayout;
     }
 
     private class SetDefaultReactionCell extends FrameLayout {
 
-        private TextView textView;
-        private AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable imageDrawable;
+        private final AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable imageDrawable;
 
         public SetDefaultReactionCell(Context context) {
             super(context);
 
-            setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
-
-            textView = new TextView(context);
+            TextView textView = new TextView(context);
             textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-            textView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
-            textView.setText(LocaleController.getString("DoubleTapSetting", R.string.DoubleTapSetting));
+            ThemeBind.textColor(textView, Theme.key_windowBackgroundWhiteBlackText, ReactionsDoubleTapManageActivity.this.getResourceProvider());
+            textView.setText(LocaleController.getString(R.string.DoubleTapSetting));
             addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 20, 0, 48, 0));
 
             imageDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(this, AndroidUtilities.dp(24));
@@ -263,7 +274,7 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
     }
 
     private SelectAnimatedEmojiDialog.SelectAnimatedEmojiDialogWindow selectAnimatedEmojiDialog;
-    public void showSelectStatusDialog(SetDefaultReactionCell cell) {
+    private void showSelectStatusDialog(SetDefaultReactionCell cell) {
         if (selectAnimatedEmojiDialog != null) {
             return;
         }
@@ -280,12 +291,12 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
                 AndroidUtilities.rectTmp2.set(cell.imageDrawable.getBounds());
                 yoff = -(cell.getHeight() - AndroidUtilities.rectTmp2.centerY()) - AndroidUtilities.dp(16);
                 int popupWidth = (int) Math.min(AndroidUtilities.dp(340 - 16), AndroidUtilities.displaySize.x * .95f);
-                xoff = AndroidUtilities.rectTmp2.centerX() - (AndroidUtilities.displaySize.x - popupWidth);
+                xoff = AndroidUtilities.rectTmp2.centerX() - (AndroidUtilities.displaySize.x - AndroidUtilities.dp(12) - popupWidth);
             }
         }
         SelectAnimatedEmojiDialog popupLayout = new SelectAnimatedEmojiDialog(this, getContext(), false, xoff, SelectAnimatedEmojiDialog.TYPE_SET_DEFAULT_REACTION, null) {
             @Override
-            protected void onEmojiSelected(View emojiView, Long documentId, TLRPC.Document document, Integer until) {
+            protected void onEmojiSelected(View emojiView, Long documentId, TLRPC.Document document, TL_stars.TL_starGiftUnique gift, Integer until) {
                 if (documentId == null) {
                     return;
                 }
@@ -355,8 +366,10 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
     @Override
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
-        getNotificationCenter().removeObserver(this, NotificationCenter.reactionsDidLoad);
-        getNotificationCenter().removeObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
+        if (observersGroup != null) {
+            observersGroup.removeAllObservers();
+            observersGroup = null;
+        }
     }
 
     private List<TLRPC.TL_availableReaction> getAvailableReactions() {
@@ -384,7 +397,6 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
 
     @SuppressLint("NotifyDataSetChanged")
     private void updateColors() {
-        contentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
         listAdapter.notifyDataSetChanged();
     }
 
@@ -398,5 +410,16 @@ public class ReactionsDoubleTapManageActivity extends BaseFragment implements No
             updateRows();
             listAdapter.notifyDataSetChanged();
         }
+    }
+
+    @Override
+    public boolean isSupportEdgeToEdge() {
+        return true;
+    }
+
+    @Nullable
+    @Override
+    protected RecyclerListView getListViewForSimpleGlass() {
+        return listView;
     }
 }

@@ -38,7 +38,7 @@ import android.view.animation.DecelerateInterpolator;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import org.telegram.ui.AspectRatioFrameLayout;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -290,6 +290,7 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
             windowLayoutParams.gravity = Gravity.TOP | Gravity.LEFT;
             windowLayoutParams.type = WindowManager.LayoutParams.LAST_APPLICATION_WINDOW;
             windowLayoutParams.flags = WindowManager.LayoutParams.FLAG_NOT_FOCUSABLE | WindowManager.LayoutParams.FLAG_HARDWARE_ACCELERATED | WindowManager.LayoutParams.FLAG_LAYOUT_NO_LIMITS;
+            AndroidUtilities.setPreferredMaxRefreshRate(windowManager, windowView, windowLayoutParams);
             windowManager.addView(windowView, windowLayoutParams);
         } catch (Exception e) {
             FileLog.e(e);
@@ -297,7 +298,7 @@ public class PipRoundVideoView implements NotificationCenter.NotificationCenterD
         }
         parentActivity = activity;
         currentAccount = UserConfig.selectedAccount;
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.messagePlayingProgressDidChanged);
         runShowHideAnimation(true);
     }
 

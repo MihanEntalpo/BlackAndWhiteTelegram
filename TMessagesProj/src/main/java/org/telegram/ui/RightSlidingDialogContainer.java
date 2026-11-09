@@ -8,12 +8,14 @@ import android.animation.ValueAnimator;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
+import android.util.Log;
 import android.view.MotionEvent;
 import android.view.VelocityTracker;
 import android.view.View;
 import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
+import androidx.core.view.ViewCompat;
 import androidx.dynamicanimation.animation.FloatValueHolder;
 import androidx.dynamicanimation.animation.SpringAnimation;
 import androidx.dynamicanimation.animation.SpringForce;
@@ -60,7 +62,7 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
         if (fragment.onFragmentCreate()) {
             fragment.setInPreviewMode(true);
             fragment.setParentLayout(navigationLayout);
-            View view = fragment.createView(getContext());
+            View view = fragment.performCreateView(getContext());
 
             fragment.onResume();
             addView(currentFragmentView = view);
@@ -125,6 +127,7 @@ public abstract class RightSlidingDialogContainer extends FrameLayout {
             }
 
             fragment.setPreviewDelegate(() -> finishPreview());
+            ViewCompat.requestApplyInsets(this);
         }
     }
 

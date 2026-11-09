@@ -15,6 +15,7 @@ import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.WallpaperCell;
 import org.telegram.ui.PhotoViewer;
 import org.telegram.ui.WallpapersListActivity;
@@ -62,7 +63,7 @@ public class ChatAttachAlertColorsLayout extends ChatAttachAlert.AttachAlertLayo
         gridView.setItemAnimator(null);
         gridView.setLayoutAnimation(null);
         gridView.setVerticalScrollBarEnabled(false);
-        gridView.setGlowColor(getThemedColor(Theme.key_dialogScrollGlow));
+        ThemeBind.listGlowColor(gridView, Theme.key_dialogScrollGlow, resourcesProvider);
         addView(gridView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
         gridView.setOnScrollListener(new RecyclerView.OnScrollListener() {
 
@@ -276,7 +277,7 @@ public class ChatAttachAlertColorsLayout extends ChatAttachAlert.AttachAlertLayo
         try {
             parentAlert.actionBar.getTitleTextView().setBuildFullLayout(true);
         } catch (Exception ignore) {}
-        parentAlert.actionBar.setTitle(LocaleController.getString("SelectColor", R.string.SelectColor));
+        parentAlert.actionBar.setTitle(LocaleController.getString(R.string.SelectColor));
         layoutManager.scrollToPositionWithOffset(0, 0);
     }
 }

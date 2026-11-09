@@ -9,18 +9,12 @@ import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
-import android.graphics.RadialGradient;
-import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
-import android.text.Layout;
-import android.text.StaticLayout;
-import android.text.TextPaint;
 import android.view.Gravity;
 import android.view.View;
 
 import androidx.annotation.NonNull;
 
-import org.checkerframework.checker.units.qual.A;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
@@ -50,7 +44,7 @@ public class TrashView extends View {
         circlePaint.setShadowLayer(dpf2(3f), 0, dp(1.66f), 0x30000000);
         greyPaint.setColor(0x33000000);
 
-        drawable = new RLottieDrawable(R.raw.group_pip_delete_icon, "" + R.raw.group_pip_delete_icon, dp(48), dp(48), true, null);
+        drawable = new RLottieDrawable(R.raw.group_pip_delete_icon, dp(48), dp(48), true, null);
         drawable.setMasterParent(this);
         drawable.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.MULTIPLY));
         drawable.setPlayInDirectionOfCustomEndFrame(true);
@@ -64,7 +58,7 @@ public class TrashView extends View {
         textDrawable.setTextSize(dp(14));
         textDrawable.setTextColor(0xffffffff);
         textDrawable.setShadowLayer(dpf2(1.33f), 0, dp(1), 0x40000000);
-        textDrawable.setText(LocaleController.getString("TrashHintDrag", R.string.TrashHintDrag));
+        textDrawable.setText(LocaleController.getString(R.string.TrashHintDrag));
         textDrawable.setGravity(Gravity.CENTER);
     }
 
@@ -100,7 +94,7 @@ public class TrashView extends View {
 
     public void onDragInfo(boolean dragged, boolean deleted) {
         bounce.setPressed(dragged);
-        textDrawable.setText(dragged || deleted ? LocaleController.getString("TrashHintRelease", R.string.TrashHintRelease) : LocaleController.getString("TrashHintDrag", R.string.TrashHintDrag));
+        textDrawable.setText(dragged || deleted ? LocaleController.getString(R.string.TrashHintRelease) : LocaleController.getString(R.string.TrashHintDrag));
         if (this.dragged = (dragged && !deleted)) {
             if (drawable.getCurrentFrame() > 34) {
                 drawable.setCurrentFrame(0, false);

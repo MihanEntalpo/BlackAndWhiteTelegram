@@ -14,6 +14,7 @@ import androidx.core.content.ContextCompat;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.GenericProvider;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 
 public class CheckBox2 extends View {
 
@@ -70,6 +71,10 @@ public class CheckBox2 extends View {
 
     public void setDrawUnchecked(boolean value) {
         checkBoxBase.setDrawUnchecked(value);
+    }
+
+    public boolean getDrawUnchecked() {
+        return checkBoxBase.getDrawUnchecked();
     }
 
     public void setDrawBackgroundAsArc(int type) {
@@ -138,7 +143,7 @@ public class CheckBox2 extends View {
                 iconDrawable = null;
             } else {
                 iconDrawable = ContextCompat.getDrawable(getContext(), icon).mutate();
-                iconDrawable.setColorFilter(Theme.getColor(Theme.key_switch2Track), PorterDuff.Mode.MULTIPLY);
+                ThemeBind.drawableColorFilter(this, iconDrawable, Theme.key_switch2Track, PorterDuff.Mode.MULTIPLY);
             }
         }
     }

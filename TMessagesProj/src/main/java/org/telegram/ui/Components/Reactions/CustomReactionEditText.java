@@ -1,5 +1,6 @@
 package org.telegram.ui.Components.Reactions;
 
+import org.telegram.messenger.FileLog;
 import android.annotation.SuppressLint;
 import android.content.Context;
 import android.graphics.Paint;
@@ -21,14 +22,25 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.EditTextCaption;
 
 @SuppressLint("ViewConstructor")
-public class CustomReactionEditText extends EditTextCaption {
+public class CustomReactionEditText extends EditTextCaption implements Theme.Colorable {
 
     private final Theme.ResourcesProvider resourcesProvider;
     private final GestureDetectorCompat gestureDetector;
     private Runnable onFocused;
+
+    private int maxLength;
+
+    public void setMaxLength(int maxLength) {
+        if (this.maxLength != maxLength) {
+            InputFilter[] inputFilters = new InputFilter[1];
+            inputFilters[0] = new InputFilter.LengthFilter(this.maxLength = maxLength);
+            setFilters(inputFilters);
+        }
+    }
 
     public CustomReactionEditText(Context context, Theme.ResourcesProvider resourcesProvider, int maxLength) {
         super(context, resourcesProvider);
@@ -39,7 +51,7 @@ public class CustomReactionEditText extends EditTextCaption {
                 return true;
             }
         });
-        setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+        setBackground(null);
         setIncludeFontPadding(true);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
             setShowSoftInputOnFocus(false);
@@ -47,18 +59,18 @@ public class CustomReactionEditText extends EditTextCaption {
         setSingleLine(false);
         setMaxLines(50);
         InputFilter[] inputFilters = new InputFilter[1];
-        inputFilters[0] = new InputFilter.LengthFilter(maxLength);
+        inputFilters[0] = new InputFilter.LengthFilter(this.maxLength = maxLength);
         setFilters(inputFilters);
         setTextSize(TypedValue.COMPLEX_UNIT_DIP, 22);
         setGravity(Gravity.BOTTOM);
         setPadding(AndroidUtilities.dp(18), AndroidUtilities.dp(4), AndroidUtilities.dp(18), AndroidUtilities.dp(12));
-        setTextColor(getThemedColor(Theme.key_chat_messagePanelText));
-        setLinkTextColor(getThemedColor(Theme.key_chat_messageLinkOut));
-        setHighlightColor(getThemedColor(Theme.key_chat_inTextSelectionHighlight));
-        setHintColor(getThemedColor(Theme.key_chat_messagePanelHint));
-        setHintTextColor(getThemedColor(Theme.key_chat_messagePanelHint));
-        setCursorColor(getThemedColor(Theme.key_chat_messagePanelCursor));
-        setHandlesColor(getThemedColor(Theme.key_chat_TextSelectionCursor));
+        ThemeBind.textColor(this, Theme.key_chat_messagePanelText, resourcesProvider);
+        ThemeBind.linkTextColor(this, Theme.key_chat_messageLinkOut, resourcesProvider);
+        ThemeBind.highlightColor(this, Theme.key_chat_inTextSelectionHighlight, resourcesProvider);
+        ThemeBind.editHintColor(this, Theme.key_chat_messagePanelHint, resourcesProvider);
+        ThemeBind.hintTextColor(this, Theme.key_chat_messagePanelHint, resourcesProvider);
+        ThemeBind.cursorColor(this, Theme.key_chat_messagePanelCursor, resourcesProvider);
+        ThemeBind.editHandlesColor(this, Theme.key_chat_TextSelectionCursor, resourcesProvider);
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
             setFallbackLineSpacing(false);
         }
@@ -101,7 +113,7 @@ public class CustomReactionEditText extends EditTextCaption {
     @Override
     protected void extendActionMode(ActionMode actionMode, Menu menu) {
         menu.clear();
-        menu.add(R.id.menu_delete, R.id.menu_delete, 0, LocaleController.getString("Delete", R.string.Delete));
+        menu.add(R.id.menu_delete, R.id.menu_delete, 0, LocaleController.getString(R.string.Delete));
     }
 
     public void setOnFocused(Runnable onFocused) {
@@ -161,5 +173,17 @@ public class CustomReactionEditText extends EditTextCaption {
 
     public Paint.FontMetricsInt getFontMetricsInt() {
         return getPaint().getFontMetricsInt();
+    }
+
+    @Override
+    public void updateColors() {
+        try {
+            setHintColor(getThemedColor(Theme.key_chat_messagePanelHint));
+            setCursorColor(getThemedColor(Theme.key_chat_messagePanelCursor));
+            setHandlesColor(getThemedColor(Theme.key_chat_TextSelectionCursor));
+            invalidate();
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 }

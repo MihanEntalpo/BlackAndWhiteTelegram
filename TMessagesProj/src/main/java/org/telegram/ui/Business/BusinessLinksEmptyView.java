@@ -17,9 +17,10 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
-import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -30,7 +31,7 @@ public class BusinessLinksEmptyView extends LinearLayout {
     private TextView descriptionView;
     private TextView linkView;
 
-    public BusinessLinksEmptyView(Context context, BaseFragment fragment, TLRPC.TL_businessChatLink businessLink, Theme.ResourcesProvider resourcesProvider) {
+    public BusinessLinksEmptyView(Context context, BaseFragment fragment, TL_account.TL_businessChatLink businessLink, Theme.ResourcesProvider resourcesProvider) {
         super(context);
         setOrientation(VERTICAL);
 
@@ -46,7 +47,7 @@ public class BusinessLinksEmptyView extends LinearLayout {
         descriptionView = new TextView(context);
         descriptionView.setTextAlignment(TEXT_ALIGNMENT_CENTER);
         descriptionView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        descriptionView.setTextColor(Theme.getColor(Theme.key_chat_serviceText, resourcesProvider));
+        ThemeBind.textColor(descriptionView, Theme.key_chat_serviceText, resourcesProvider);
         descriptionView.setGravity(Gravity.CENTER_HORIZONTAL);
         descriptionView.setMaxWidth(dp(208));
         descriptionView.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.BusinessLinksIntro)));
@@ -55,7 +56,7 @@ public class BusinessLinksEmptyView extends LinearLayout {
         linkView = new TextView(context);
         linkView.setTextAlignment(TEXT_ALIGNMENT_CENTER);
         linkView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-        linkView.setTextColor(Theme.getColor(Theme.key_chat_serviceText, resourcesProvider));
+        ThemeBind.textColor(linkView, Theme.key_chat_serviceText, resourcesProvider);
         linkView.setTypeface(linkView.getTypeface(), Typeface.BOLD);
         linkView.setGravity(Gravity.CENTER_HORIZONTAL);
         linkView.setMaxWidth(dp(208));

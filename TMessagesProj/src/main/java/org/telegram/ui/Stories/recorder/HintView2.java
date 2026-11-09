@@ -1,6 +1,7 @@
 package org.telegram.ui.Stories.recorder;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
 
 import android.animation.Animator;
@@ -8,19 +9,25 @@ import android.animation.AnimatorListenerAdapter;
 import android.animation.ValueAnimator;
 import android.content.Context;
 import android.content.res.ColorStateList;
+import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorFilter;
+import android.graphics.ColorMatrix;
+import android.graphics.ColorMatrixColorFilter;
 import android.graphics.CornerPathEffect;
+import android.graphics.LinearGradient;
+import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
+import android.graphics.PorterDuffXfermode;
 import android.graphics.Rect;
 import android.graphics.RectF;
+import android.graphics.Shader;
 import android.graphics.Typeface;
 import android.graphics.drawable.Drawable;
-import android.graphics.drawable.RippleDrawable;
 import android.os.Build;
 import android.text.Layout;
 import android.text.Spannable;
@@ -28,7 +35,9 @@ import android.text.SpannableString;
 import android.text.Spanned;
 import android.text.StaticLayout;
 import android.text.TextPaint;
+import android.text.TextUtils;
 import android.text.style.ClickableSpan;
+import android.text.style.ReplacementSpan;
 import android.util.StateSet;
 import android.view.MotionEvent;
 import android.view.View;
@@ -38,10 +47,12 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.Emoji;
+import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.Utilities;
+import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.Cells.BaseCell;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AnimatedFloat;
@@ -52,12 +63,16 @@ import org.telegram.ui.Components.LinkPath;
 import org.telegram.ui.Components.LinkSpanDrawable;
 import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.TypefaceSpan;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.BlurredBackgroundProvider;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
 
 public class HintView2 extends View {
 
     // direction of an arrow to point
     // the gravity of location would be the same, location of arrow opposite:
-    // f.ex. hint with DIRECTION_LEFT has arrow on right and would be forced to the left ({view} <{hint})
+    // f.ex. hint with DIRECTION_LEFT has arrow on left of hint and would be forced to the left ({view} <{hint})
     public static final int DIRECTION_LEFT = 0;
     public static final int DIRECTION_TOP = 1;
     public static final int DIRECTION_RIGHT = 2;
@@ -71,18 +86,34 @@ public class HintView2 extends View {
     private boolean useScale = true;
     private boolean useTranslate = true;
     private boolean useAlpha = true;
+    private boolean useBlur = false;
     private int textMaxWidth = -1;
 
     private Drawable closeButtonDrawable;
     private boolean closeButton;
 
+    private boolean roundWithCornerEffect = true;
     protected float rounding = dp(8);
     private final RectF innerPadding = new RectF(dp(11), dp(6), dp(11), dp(7));
     private float closeButtonMargin = dp(2);
     private float arrowHalfWidth = dp(7);
     private float arrowHeight = dp(6);
 
+    public HintView2 setArrowSize(float halfWidthDp, float heightDp) {
+        this.arrowHalfWidth = dpf2(halfWidthDp);
+        this.arrowHeight = dpf2(heightDp);
+        return this;
+    }
+
     protected final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+    private Paint blurBackgroundPaint, blurCutPaint;
+
+    private int blurBitmapWidth, blurBitmapHeight;
+    private BitmapShader blurBitmapShader;
+    private Matrix blurBitmapMatrix;
+    private float blurScale = 12f;
+    private float blurAlpha = .25f;
+    private int[] blurPos;
 
     private CharSequence textToSet;
     private AnimatedTextView.AnimatedTextDrawable textDrawable;
@@ -111,6 +142,10 @@ public class HintView2 extends View {
     private int iconWidth, iconHeight;
     private boolean iconLeft;
 
+    public HintView2(Context context) {
+        this(context, 0);
+    }
+
     public HintView2(Context context, int direction) {
         super(context);
         this.direction = direction;
@@ -126,12 +161,115 @@ public class HintView2 extends View {
         setTextColor(0xffffffff);
     }
 
+    private float shadowRadius, shadowDx, shadowDy;
+    private int shadowColor;
+
+    public HintView2 setShadow(float radius, float dx, float dy, int color) {
+        this.backgroundPaint.setShadowLayer(
+            shadowRadius = radius,
+            shadowDx = dx,
+            shadowDy = dy,
+            shadowColor = color
+        );
+        return this;
+    }
+
+    public HintView2 setDirection(int direction) {
+        this.direction = direction;
+        return this;
+    }
+
+    /* Glass */
+
+    private BlurredBackgroundDrawable glass;
+    private final float glassTipRadius = dpf2(4);
+    private final float glassFilletRadius = dpf2(4);
+    // the lens a bit thicker than the tip is round: its break at the tip's axis is too small to see
+    private final float glassThickness = dpf2(5);
+    // the glass is rounder than the plain hint
+    private final float glassExtraRounding = dpf2(2);
+
+    /**
+     * The hint on the glass of the screen, its arrow out of the glass. The lens is thin, about as thick as the arrow's
+     * tip is round. The text stays white: {@link BlurredBackgroundProviderImpl#hint}, unless another style is given.
+     */
+    public HintView2 setGlass(BlurredBackgroundDrawableViewFactory factory) {
+        return setGlass(factory, null);
+    }
+
+    public HintView2 setGlass(BlurredBackgroundDrawableViewFactory factory, @Nullable BlurredBackgroundProvider style) {
+        glass = factory.create(this, style != null ? style : BlurredBackgroundProviderImpl.hint(null));
+        glass.setCallback(this);
+        glass.setRadius(rounding + glassExtraRounding);
+        glass.setThickness((int) glassThickness);
+        glass.setIntensity(1f);
+        glass.setEvenRim(true);
+        glass.setAlpha(0);
+        pathSet = false;
+        invalidate();
+        return this;
+    }
+
+    private void updateGlassShape() {
+        if (glass == null) {
+            return;
+        }
+        final int arrow = Math.round(arrowHeight);
+        int l = Math.round(bounds.left), t = Math.round(bounds.top), r = Math.round(bounds.right), b = Math.round(bounds.bottom);
+        switch (direction) {
+            case DIRECTION_LEFT: l -= arrow; break;
+            case DIRECTION_TOP: t -= arrow; break;
+            case DIRECTION_RIGHT: r += arrow; break;
+            default: b += arrow; break;
+        }
+        final boolean vertical = direction == DIRECTION_LEFT || direction == DIRECTION_RIGHT;
+        glass.setArrow(direction, vertical ? arrowY : arrowX, arrow, glassTipRadius, glassFilletRadius);
+        glass.setBounds(l, t, r, b);
+    }
+
     public HintView2 setRounding(float roundingDp) {
         this.rounding = dp(roundingDp);
-        backgroundPaint.setPathEffect(new CornerPathEffect(rounding));
-        if (cutSelectorPaint != null) {
-            cutSelectorPaint.setPathEffect(new CornerPathEffect(rounding));
+        if (glass != null) {
+            glass.setRadius(rounding + glassExtraRounding);
         }
+        backgroundPaint.setPathEffect(roundWithCornerEffect ? new CornerPathEffect(rounding) : null);
+        if (cutSelectorPaint != null) {
+            cutSelectorPaint.setPathEffect(roundWithCornerEffect ? new CornerPathEffect(rounding) : null);
+        }
+        if (blurCutPaint != null) {
+            blurCutPaint.setPathEffect(roundWithCornerEffect ? new CornerPathEffect(rounding) : null);
+        }
+        return this;
+    }
+
+    public HintView2 setRoundingWithCornerEffect(boolean enable) {
+        roundWithCornerEffect = enable;
+        backgroundPaint.setPathEffect(roundWithCornerEffect ? new CornerPathEffect(rounding) : null);
+        return this;
+    }
+
+    public HintView2 setFlicker(float lineWidthDp, int color) {
+        this.flicker = true;
+        flickerStart = System.currentTimeMillis();
+
+        flickerStrokePath = new Path();
+        flickerStrokePathExtrude = dpf2(lineWidthDp) / 2.0f;
+
+        flickerFillPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        flickerStrokePaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        flickerStrokeGradient = new LinearGradient(0, 0, dp(64), 0, new int[] { Theme.multAlpha(color, 0.0f), Theme.multAlpha(color, 1.0f), Theme.multAlpha(color, 0.0f) }, new float[] { 0, .5f, 1f }, Shader.TileMode.CLAMP);
+        flickerStrokePaint.setShader(flickerStrokeGradient);
+
+        flickerGradient = new LinearGradient(0, 0, dp(64), 0, new int[] { Theme.multAlpha(color, 0.0f), Theme.multAlpha(color, 0.5f), Theme.multAlpha(color, 0.0f) }, new float[] { 0, .5f, 1f }, Shader.TileMode.CLAMP);
+        flickerGradientMatrix = new Matrix();
+        flickerFillPaint.setShader(flickerGradient);
+
+        flickerStrokePaint.setStyle(Paint.Style.STROKE);
+        flickerStrokePaint.setStrokeJoin(Paint.Join.ROUND);
+        flickerStrokePaint.setStrokeCap(Paint.Cap.ROUND);
+        flickerStrokePaint.setStrokeWidth(dpf2(lineWidthDp));
+
         return this;
     }
 
@@ -179,9 +317,18 @@ public class HintView2 extends View {
         return this;
     }
 
-    public HintView2 setTextSize(int sizeDp) {
-        textDrawable.setTextSize(dp(sizeDp));
-        textPaint.setTextSize(dp(sizeDp));
+    public HintView2 allowBlur() {
+        return allowBlur(true);
+    }
+
+    public HintView2 allowBlur(boolean allow) {
+        useBlur = allow && LiteMode.isEnabled(LiteMode.FLAG_CHAT_BLUR);
+        return this;
+    }
+
+    public HintView2 setTextSize(float sizeDp) {
+        textDrawable.setTextSize(dpf2(sizeDp));
+        textPaint.setTextSize(dpf2(sizeDp));
         return this;
     }
 
@@ -210,7 +357,7 @@ public class HintView2 extends View {
     }
 
     public HintView2 setIcon(int resId) {
-        RLottieDrawable icon = new RLottieDrawable(resId, "" + resId, dp(34), dp(34));
+        RLottieDrawable icon = new RLottieDrawable(resId, dp(34), dp(34));
         icon.start();
         return setIcon(icon);
     }
@@ -233,7 +380,7 @@ public class HintView2 extends View {
         return this;
     }
 
-    private static float measureCorrectly(CharSequence text, TextPaint paint) {
+    public static float measureCorrectly(CharSequence text, Paint paint) {
         if (text == null) {
             return 0;
         }
@@ -242,23 +389,36 @@ public class HintView2 extends View {
         }
         Spanned spanned = (Spanned) text;
         TypefaceSpan[] spans = spanned.getSpans(0, text.length(), TypefaceSpan.class);
-        AnimatedEmojiSpan[] animatedSpans = spanned.getSpans(0, text.length(), AnimatedEmojiSpan.class);
-        Emoji.EmojiSpan[] emojiSpans = spanned.getSpans(0, text.length(), Emoji.EmojiSpan.class);
+//        AnimatedEmojiSpan[] animatedSpans = spanned.getSpans(0, text.length(), AnimatedEmojiSpan.class);
+//        Emoji.EmojiSpan[] emojiSpans = spanned.getSpans(0, text.length(), Emoji.EmojiSpan.class);
+        ReplacementSpan[] replacementSpans = spanned.getSpans(0, text.length(), ReplacementSpan.class);
         int add = 0;
-        for (int i = 0; i < emojiSpans.length; ++i) {
-            add += emojiSpans[i].size;
+//        for (int i = 0; i < emojiSpans.length; ++i) {
+//            Emoji.EmojiSpan span = emojiSpans[i];
+//            final int start = spanned.getSpanStart(span);
+//            final int end = spanned.getSpanEnd(span);
+//            add += Math.max(0, span.size - paint.measureText(spanned, start, end));
+//        }
+        for (int i = 0; i < replacementSpans.length; ++i) {
+            ReplacementSpan span = replacementSpans[i];
+            final int start = spanned.getSpanStart(span);
+            final int end = spanned.getSpanEnd(span);
+            add += Math.max(0, span.getSize(paint, text, start, end, paint.getFontMetricsInt()) - paint.measureText(spanned, start, end));
         }
-        for (int i = 0; i < animatedSpans.length; ++i) {
-            add += animatedSpans[i].size;
-        }
+//        for (int i = 0; i < animatedSpans.length; ++i) {
+//            AnimatedEmojiSpan span = animatedSpans[i];
+//            final int start = spanned.getSpanStart(span);
+//            final int end = spanned.getSpanEnd(span);
+//            add += Math.max(0, span.getSize(paint, text, start, end, paint.getFontMetricsInt()) - paint.measureText(spanned, start, end));
+//        }
         if (spans == null || spans.length == 0) {
             return paint.measureText(text.toString()) + add;
         }
         float len = 0;
         int s = 0, e;
         for (int i = 0; i < spans.length; ++i) {
-            int spanstart = spanned.getSpanStart(spans[i]);
-            int spanend   = spanned.getSpanEnd(spans[i]);
+            final int spanstart = spanned.getSpanStart(spans[i]);
+            final int spanend   = spanned.getSpanEnd(spans[i]);
 
             e = Math.max(s, spanstart);
             if (e - s > 0) {
@@ -283,6 +443,9 @@ public class HintView2 extends View {
 
     // returns max width
     public static int cutInFancyHalf(CharSequence text, TextPaint paint) {
+        if (TextUtils.indexOf(text, '\n') >= 0) {
+            return Integer.MAX_VALUE;
+        }
         int mid = text.length() / 2;
         float leftWidth = 0, rightWidth = 0;
         float prevLeftWidth = 0;
@@ -290,17 +453,13 @@ public class HintView2 extends View {
 
         int dir = -1;
         for (int i = 0; i < 10; ++i) {
-            // Adjust the mid to point to the nearest space on the left
             while (mid > 0 && mid < text.length() && text.charAt(mid) != ' ') {
                 mid += dir;
             }
 
-
             leftWidth = measureCorrectly(text.subSequence(0, mid), paint);
             rightWidth = measureCorrectly(AndroidUtilities.getTrimmedString(text.subSequence(mid, text.length())), paint);
 
-            // If we're not making progress, exit the loop.
-            // (This is a basic way to ensure termination when we can't improve the result.)
             if (leftWidth == prevLeftWidth && rightWidth == prevRightWidth) {
                 break;
             }
@@ -308,25 +467,76 @@ public class HintView2 extends View {
             prevLeftWidth = leftWidth;
             prevRightWidth = rightWidth;
 
-            // If left side is shorter, move midpoint to the right.
             if (leftWidth < rightWidth) {
                 dir = +1;
                 mid += dir;
-            }
-            // If right side is shorter or equal, move midpoint to the left.
-            else {
+            } else {
                 dir = -1;
                 mid += dir;
             }
 
-            // Ensure mid doesn't go out of bounds
             if (mid <= 0 || mid >= text.length()) {
                 break;
             }
         }
 
-        // Return the max width of the two parts.
         return (int) Math.ceil(Math.max(leftWidth, rightWidth));
+    }
+
+    public static CharSequence cutInFancyHalfText(CharSequence text, TextPaint paint) {
+        if (TextUtils.indexOf(text, '\n') >= 0) {
+            return text;
+        }
+        int mid = text.length() / 2;
+        int lastMid = mid;
+        float leftWidth = 0, rightWidth = 0;
+        float prevLeftWidth = 0;
+        float prevRightWidth = Float.MAX_VALUE;
+        int bestMid = -1;
+        float bestWidth = Float.MAX_VALUE;
+
+        int dir = -1;
+        for (int i = 0; i < 10; ++i) {
+            while (mid > 0 && mid < text.length() && text.charAt(mid) != ' ') {
+                mid += dir;
+            }
+
+            leftWidth = measureCorrectly(text.subSequence(0, mid), paint);
+            rightWidth = measureCorrectly(AndroidUtilities.getTrimmedString(text.subSequence(mid, text.length())), paint);
+            lastMid = mid;
+            if (mid > 0 && mid < text.length() && Math.max(leftWidth, rightWidth) < bestWidth) {
+                bestWidth = Math.max(leftWidth, rightWidth);
+                bestMid = mid;
+            }
+
+            if (leftWidth == prevLeftWidth && rightWidth == prevRightWidth) {
+                break;
+            }
+
+            prevLeftWidth = leftWidth;
+            prevRightWidth = rightWidth;
+
+            if (leftWidth < rightWidth) {
+                dir = +1;
+                mid += dir;
+            } else {
+                dir = -1;
+                mid += dir;
+            }
+
+            if (mid <= 0 || mid >= text.length()) {
+                break;
+            }
+        }
+        if (bestMid < 0) {
+            return text;
+        }
+        lastMid = bestMid;
+        return TextUtils.concat(
+            AndroidUtilities.getTrimmedString(text.subSequence(0, lastMid)),
+            "\n",
+            AndroidUtilities.getTrimmedString(text.subSequence(lastMid, text.length()))
+        );
     }
 
     public HintView2 useScale(boolean enable) {
@@ -353,8 +563,8 @@ public class HintView2 extends View {
     // distances from text to inner hint bounds
     // use setPadding() or custom layout to move possible bounds of the hint location
     // call last, as paddings are dependent on multiline and closeButton
-    public HintView2 setInnerPadding(int leftDp, int topDp, int rightDp, int bottomDp) {
-        innerPadding.set(dp(leftDp), dp(topDp), dp(rightDp), dp(bottomDp));
+    public HintView2 setInnerPadding(float leftDp, float topDp, float rightDp, float bottomDp) {
+        innerPadding.set(dpf2(leftDp), dpf2(topDp), dpf2(rightDp), dpf2(bottomDp));
         return this;
     }
 
@@ -395,7 +605,7 @@ public class HintView2 extends View {
                 new int[][]{ StateSet.WILD_CARD },
                 new int[]{ selectorColor }
         );
-        selectorDrawable = new RippleDrawable(colorStateList, null, new Drawable() {
+        selectorDrawable = new BaseCell.RippleDrawableSafe(colorStateList, null, new Drawable() {
             @Override
             public void draw(@NonNull Canvas canvas) {
                 canvas.save();
@@ -428,7 +638,10 @@ public class HintView2 extends View {
     }
 
     public HintView2 setBgColor(int color) {
-        backgroundPaint.setColor(color);
+        if (backgroundPaint.getColor() != color) {
+            backgroundPaint.setColor(color);
+            invalidate();
+        }
         return this;
     }
 
@@ -461,6 +674,121 @@ public class HintView2 extends View {
         return this;
     }
 
+    /* Anchored, as the old HintView: the hint (as wide or as high as its parent along its arrow) moves to point at a view */
+
+    private View anchorView;
+    private float anchorX = Float.NaN, anchorY;
+    private float anchorGap, anchorOffsetX;
+    private final int[] anchorLocation = new int[2];
+
+    /** The space between the arrow's tip and the view it points at. */
+    public HintView2 setAnchorGap(float gapPx) {
+        anchorGap = gapPx;
+        return this;
+    }
+
+    /** Moves the point on the view the arrow points at along x. */
+    public HintView2 setAnchorOffsetX(float offsetPx) {
+        anchorOffsetX = offsetPx;
+        return this;
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        if (changed && shown) {
+            updatePosition();
+        }
+    }
+
+    /** Points at the middle of the view's side; false when already shown for it (then the position is updated). */
+    public boolean showForView(View view, boolean animated) {
+        final boolean same = shown && anchorView == view;
+        anchorView = view;
+        anchorX = Float.NaN;
+        updatePosition();
+        if (same) {
+            return false;
+        }
+        show();
+        if (!animated) {
+            show.force(true);
+        }
+        return true;
+    }
+
+    /** Points at x, y in the coordinates of the parent. */
+    public void showAt(float x, float y, boolean animated) {
+        anchorView = null;
+        anchorX = x;
+        anchorY = y;
+        updatePosition();
+        if (shown) {
+            return;
+        }
+        show();
+        if (!animated) {
+            show.force(true);
+        }
+    }
+
+    public boolean isShowing() {
+        return shown;
+    }
+
+    @Nullable
+    public View getAnchorView() {
+        return anchorView;
+    }
+
+    /** Follows the view it points at, e.g. after a scroll. */
+    public void updatePosition() {
+        if (!(getParent() instanceof View) || anchorView == null && Float.isNaN(anchorX)) {
+            return;
+        }
+        if (!isLaidOut()) {
+            post(this::updatePosition);
+            return;
+        }
+        float x, y;
+        if (anchorView != null) {
+            anchorView.getLocationInWindow(anchorLocation);
+            final float left = anchorLocation[0], top = anchorLocation[1];
+            ((View) getParent()).getLocationInWindow(anchorLocation);
+            float l = left - anchorLocation[0];
+            final float t = top - anchorLocation[1];
+            final int w = anchorView.getWidth(), h = anchorView.getHeight();
+            l += anchorOffsetX;
+            switch (direction) {
+                case DIRECTION_LEFT: x = l + w + anchorGap; y = t + h / 2f; break;
+                case DIRECTION_TOP: x = l + w / 2f; y = t + h + anchorGap; break;
+                case DIRECTION_RIGHT: x = l - anchorGap; y = t + h / 2f; break;
+                default: x = l + w / 2f; y = t - anchorGap; break;
+            }
+        } else {
+            x = anchorX;
+            y = anchorY;
+        }
+        switch (direction) {
+            case DIRECTION_LEFT:
+                setTranslationX(x - (getLeft() + getPaddingLeft()));
+                setJointPx(0, y - getTop() - getPaddingTop());
+                break;
+            case DIRECTION_TOP:
+                setTranslationY(y - (getTop() + getPaddingTop()));
+                setJointPx(0, x - getLeft() - getPaddingLeft());
+                break;
+            case DIRECTION_RIGHT:
+                setTranslationX(x - (getLeft() + getWidth() - getPaddingRight()));
+                setJointPx(0, y - getTop() - getPaddingTop());
+                break;
+            default:
+                setTranslationY(y - (getTop() + getHeight() - getPaddingBottom()));
+                setJointPx(0, x - getLeft() - getPaddingLeft());
+                break;
+        }
+    }
+
     public TextPaint getTextPaint() {
         if (multiline) {
             return textPaint;
@@ -471,7 +799,15 @@ public class HintView2 extends View {
 
     private final Runnable hideRunnable = this::hide;
 
+    public void show(boolean show) {
+        if (show) show();
+        else hide();
+    }
+
     public HintView2 show() {
+        if (glass == null) {
+            prepareBlur();
+        }
         if (shown) {
             bounceShow();
         }
@@ -609,18 +945,73 @@ public class HintView2 extends View {
 
     private final Rect boundsWithArrow = new Rect();
     private final RectF bounds = new RectF();
+    private final RectF flickerBounds = new RectF();
     protected final Path path = new Path();
     private float arrowX, arrowY;
     private float pathLastWidth, pathLastHeight;
     private boolean pathSet;
     private boolean firstDraw = true;
 
-    protected void drawBgPath(Canvas canvas) {
+    private boolean flicker;
+    private Path flickerStrokePath;
+    private float flickerStrokePathExtrude;
+    private Paint flickerFillPaint;
+    private Paint flickerStrokePaint;
+    private LinearGradient flickerGradient;
+    private Matrix flickerGradientMatrix;
+    private LinearGradient flickerStrokeGradient;
+    private long flickerStart;
+
+    protected void drawBgPath(Canvas canvas, float alpha) {
+        if (glass != null) {
+            glass.setAlpha(Math.max(1, (int) (0xFF * alpha)));
+            glass.draw(canvas);
+            drawFlicker(canvas);
+            return;
+        }
+        if (blurBackgroundPaint != null) {
+            canvas.saveLayerAlpha(0, 0, getWidth(), getHeight(), 0xFF, Canvas.ALL_SAVE_FLAG);
+            canvas.drawPath(path, blurBackgroundPaint);
+            canvas.drawPath(path, blurCutPaint);
+            canvas.restore();
+        }
+        if (shadowColor != 0) {
+            backgroundPaint.setShadowLayer(
+                shadowRadius,
+                shadowDx,
+                shadowDy,
+                Theme.multAlpha(shadowColor, alpha)
+            );
+        }
+        final int wasAlpha = backgroundPaint.getAlpha();
+        backgroundPaint.setAlpha((int) (wasAlpha * alpha));
         canvas.drawPath(path, backgroundPaint);
+        backgroundPaint.setAlpha(wasAlpha);
+        drawFlicker(canvas);
+    }
+
+    private void drawFlicker(Canvas canvas) {
+        if (flicker) {
+            final int delay = 4, duration = 1000;
+            final int gradientWidth = dp(64);
+            final float left = -gradientWidth + (System.currentTimeMillis() - flickerStart) % (duration * delay) / (float) (duration * delay) * (pathLastWidth * delay + gradientWidth * 2);
+
+            flickerGradientMatrix.reset();
+            flickerGradientMatrix.postTranslate(bounds.left + left, 0);
+            flickerGradient.setLocalMatrix(flickerGradientMatrix);
+            flickerStrokeGradient.setLocalMatrix(flickerGradientMatrix);
+
+            canvas.drawPath(path, flickerFillPaint);
+            canvas.drawPath(flickerStrokePath, flickerStrokePaint);
+            invalidate();
+        }
     }
 
     @Override
     protected void dispatchDraw(Canvas canvas) {
+        if (drawingMyBlur) {
+            return;
+        }
         if (multiline && textLayout == null) {
             return;
         }
@@ -631,6 +1022,10 @@ public class HintView2 extends View {
             invalidate();
         }
         if (showT <= 0) {
+            if (glass != null) {
+                // hidden: nothing to capture under it
+                glass.setAlpha(0);
+            }
             return;
         }
 
@@ -652,18 +1047,21 @@ public class HintView2 extends View {
         final float width = innerPadding.left + contentWidth + innerPadding.right;
         final float height = innerPadding.top + contentHeight + innerPadding.bottom;
         if (!pathSet || Math.abs(width - pathLastWidth) > 0.1f || Math.abs(height - pathLastHeight) > 0.1f) {
-            rewindPath(pathLastWidth = width, pathLastHeight = height);
+            fillPath(path, pathLastWidth = width, pathLastHeight = height, 0.0f, bounds, boundsWithArrow);
+            updateGlassShape();
+            if (flicker) {
+                fillPath(flickerStrokePath, width, height, flickerStrokePathExtrude, flickerBounds, null);
+            }
         }
 
         float alpha = useAlpha ? showT : 1;
         canvas.save();
         if (showT < 1 && useScale) {
-            final float scale = lerp(.5f, 1f, showT);
+            final float scale = lerp(.75f, 1f, showT);
             canvas.scale(scale, scale, arrowX, arrowY);
         }
         float bounceScale = bounce.getScale(.025f);
         if (bounceScale != 1) {
-//            canvas.scale(bounceScale, bounceScale, bounceX, bounceY);
             canvas.scale(bounceScale, bounceScale, arrowX, arrowY);
         }
         if (bounceT != 1) {
@@ -676,16 +1074,15 @@ public class HintView2 extends View {
             }
         }
 
-        final int wasAlpha = backgroundPaint.getAlpha();
+        updateBlurBounds();
         AndroidUtilities.rectTmp.set(bounds);
         AndroidUtilities.rectTmp.inset(-arrowHeight, -arrowHeight);
         float backgroundAlpha = alpha;
-        if (drawBlur(canvas, AndroidUtilities.rectTmp, path, alpha)) {
-            backgroundAlpha *= .2f;
+        if (blurBackgroundPaint != null && useBlur) {
+            backgroundAlpha *= (1f - blurAlpha);
+            blurBackgroundPaint.setAlpha((int) (0xFF * alpha));
         }
-        backgroundPaint.setAlpha((int) (wasAlpha * backgroundAlpha));
-        drawBgPath(canvas);
-        backgroundPaint.setAlpha(wasAlpha);
+        drawBgPath(canvas, backgroundAlpha);
 
         if (selectorDrawable != null) {
             selectorDrawable.setAlpha((int) (0xFF * alpha));
@@ -752,19 +1149,17 @@ public class HintView2 extends View {
         canvas.restore();
     }
 
-    protected boolean drawBlur(Canvas canvas, RectF bounds, Path path, float alpha) {
-        return false;
-    }
-
-    private void rewindPath(float width, float height) {
+    private final RectF oval = new RectF();
+    private void fillPath(Path path, float width, float height, float extrude, RectF bounds, Rect boundsWithArrow) {
         float arrowXY;
+        final float r = Math.min(rounding, Math.min(width / 2, height / 2));
         if (direction == DIRECTION_TOP || direction == DIRECTION_BOTTOM) {
             arrowXY = lerp(getPaddingLeft(), getMeasuredWidth() - getPaddingRight(), joint);
             arrowXY = Utilities.clamp(arrowXY + jointTranslate, getMeasuredWidth() - getPaddingRight(), getPaddingLeft());
             float left = Math.max(getPaddingLeft(), arrowXY - width / 2f);
             float right = Math.min(left + width, getMeasuredWidth() - getPaddingRight());
             left = right - width;
-            arrowXY = Utilities.clamp(arrowXY, right - rounding - arrowHalfWidth, left + rounding + arrowHalfWidth);
+            arrowXY = Utilities.clamp(arrowXY, right - r - arrowHalfWidth, left + r + arrowHalfWidth);
             if (direction == DIRECTION_TOP) {
                 bounds.set(left, getPaddingTop() + arrowHeight, right, getPaddingTop() + arrowHeight + height);
             } else {
@@ -776,17 +1171,25 @@ public class HintView2 extends View {
             float top = Math.max(getPaddingTop(), arrowXY - height / 2f);
             float bottom = Math.min(top + height, getMeasuredHeight() - getPaddingBottom());
             top = bottom - height;
-            arrowXY = Utilities.clamp(arrowXY, bottom - rounding - arrowHalfWidth, top + rounding + arrowHalfWidth);
+            arrowXY = Utilities.clamp(arrowXY, bottom - r - arrowHalfWidth, top + r + arrowHalfWidth);
             if (direction == DIRECTION_LEFT) {
                 bounds.set(getPaddingLeft() + arrowHeight, top, getPaddingLeft() + arrowHeight + width, bottom);
             } else {
                 bounds.set(getMeasuredWidth() - getPaddingRight() - arrowHeight - width, top, getMeasuredWidth() - getPaddingRight() - arrowHeight, bottom);
             }
         }
-        boundsWithArrow.set((int) bounds.left, (int) bounds.top, (int) bounds.right, (int) bounds.bottom);
+        bounds.inset(-extrude, -extrude);
+        if (boundsWithArrow != null) {
+            boundsWithArrow.set((int) bounds.left, (int) bounds.top, (int) bounds.right, (int) bounds.bottom);
+        }
 
         path.rewind();
-        path.moveTo(bounds.left, bounds.bottom);
+        if (roundWithCornerEffect) {
+            path.moveTo(bounds.left, bounds.bottom);
+        } else {
+            oval.set(bounds.left, bounds.bottom - r * 2, bounds.left + r * 2, bounds.bottom);
+            path.arcTo(oval, 90, 90);
+        }
         if (direction == DIRECTION_LEFT) {
             path.lineTo(bounds.left, arrowXY + arrowHalfWidth + dp(2));
             path.lineTo(bounds.left, arrowXY + arrowHalfWidth);
@@ -796,9 +1199,16 @@ public class HintView2 extends View {
             path.lineTo(bounds.left - arrowHeight, arrowXY - dp(1));
             path.lineTo(bounds.left, arrowXY - arrowHalfWidth);
             path.lineTo(bounds.left, arrowXY - arrowHalfWidth - dp(2));
-            boundsWithArrow.left -= arrowHeight;
+            if (boundsWithArrow != null) {
+                boundsWithArrow.left -= arrowHeight;
+            }
         }
-        path.lineTo(bounds.left, bounds.top);
+        if (roundWithCornerEffect) {
+            path.lineTo(bounds.left, bounds.top);
+        } else {
+            oval.set(bounds.left, bounds.top, bounds.left + r * 2, bounds.top + r * 2);
+            path.arcTo(oval, 180, 90);
+        }
         if (direction == DIRECTION_TOP) {
             path.lineTo(arrowXY - arrowHalfWidth - dp(2), bounds.top);
             path.lineTo(arrowXY - arrowHalfWidth, bounds.top);
@@ -808,9 +1218,16 @@ public class HintView2 extends View {
             path.lineTo(arrowXY + dp(1), bounds.top - arrowHeight);
             path.lineTo(arrowXY + arrowHalfWidth, bounds.top);
             path.lineTo(arrowXY + arrowHalfWidth + dp(2), bounds.top);
-            boundsWithArrow.top -= arrowHeight;
+            if (boundsWithArrow != null) {
+                boundsWithArrow.top -= arrowHeight;
+            }
         }
-        path.lineTo(bounds.right, bounds.top);
+        if (roundWithCornerEffect) {
+            path.lineTo(bounds.right, bounds.top);
+        } else {
+            oval.set(bounds.right - r * 2, bounds.top, bounds.right, bounds.top + r * 2);
+            path.arcTo(oval, 270, 90);
+        }
         if (direction == DIRECTION_RIGHT) {
             path.lineTo(bounds.right, arrowXY - arrowHalfWidth - dp(2));
             path.lineTo(bounds.right, arrowXY - arrowHalfWidth);
@@ -820,9 +1237,16 @@ public class HintView2 extends View {
             path.lineTo(bounds.right + arrowHeight, arrowXY + dp(1));
             path.lineTo(bounds.right, arrowXY + arrowHalfWidth);
             path.lineTo(bounds.right, arrowXY + arrowHalfWidth + dp(2));
-            boundsWithArrow.right += arrowHeight;
+            if (boundsWithArrow != null) {
+                boundsWithArrow.right += arrowHeight;
+            }
         }
-        path.lineTo(bounds.right, bounds.bottom);
+        if (roundWithCornerEffect) {
+            path.lineTo(bounds.right, bounds.bottom);
+        } else {
+            oval.set(bounds.right - r * 2, bounds.bottom - r * 2, bounds.right, bounds.bottom);
+            path.arcTo(oval, 0, 90);
+        }
         if (direction == DIRECTION_BOTTOM) {
             path.lineTo(arrowXY + arrowHalfWidth + dp(2), bounds.bottom);
             path.lineTo(arrowXY + arrowHalfWidth, bounds.bottom);
@@ -832,7 +1256,9 @@ public class HintView2 extends View {
             path.lineTo(arrowXY - dp(1), bounds.bottom + arrowHeight);
             path.lineTo(arrowXY - arrowHalfWidth, bounds.bottom);
             path.lineTo(arrowXY - arrowHalfWidth - dp(2), bounds.bottom);
-            boundsWithArrow.bottom += arrowHeight;
+            if (boundsWithArrow != null) {
+                boundsWithArrow.bottom += arrowHeight;
+            }
         }
         path.close();
         pathSet = true;
@@ -840,7 +1266,7 @@ public class HintView2 extends View {
 
     @Override
     protected boolean verifyDrawable(@NonNull Drawable who) {
-        return who == textDrawable || who == selectorDrawable || who == icon || super.verifyDrawable(who);
+        return who == textDrawable || who == selectorDrawable || who == icon || who == glass || super.verifyDrawable(who);
     }
 
     @Override
@@ -965,4 +1391,47 @@ public class HintView2 extends View {
         }
         return null;
     }
+
+    private boolean drawingMyBlur;
+
+    private void prepareBlur() {
+        if (!useBlur) return;
+
+        drawingMyBlur = true;
+        AndroidUtilities.makeGlobalBlurBitmap(bitmap -> {
+            drawingMyBlur = false;
+            blurBitmapWidth = bitmap.getWidth();
+            blurBitmapHeight = bitmap.getHeight();
+            blurBitmapShader = new BitmapShader(bitmap, Shader.TileMode.CLAMP, Shader.TileMode.CLAMP);
+            blurBitmapMatrix = new Matrix();
+            blurBackgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            blurBackgroundPaint.setShader(blurBitmapShader);
+            ColorMatrix colorMatrix = new ColorMatrix();
+            colorMatrix.setSaturation(1.5f);
+            AndroidUtilities.adjustBrightnessColorMatrix(colorMatrix, Theme.isCurrentThemeDark() ? +.12f : -.08f);
+            blurBackgroundPaint.setColorFilter(new ColorMatrixColorFilter(colorMatrix));
+            blurCutPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+            blurCutPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.DST_IN));
+            blurCutPaint.setPathEffect(new CornerPathEffect(rounding));
+        }, blurScale);
+    }
+
+    private void updateBlurBounds() {
+        if (!useBlur) return;
+        if (blurBitmapShader == null || blurBitmapMatrix == null) return;
+
+        if (blurPos == null) {
+            blurPos = new int[2];
+        }
+        getLocationOnScreen(blurPos);
+        blurBitmapMatrix.reset();
+        blurBitmapMatrix.postScale(AndroidUtilities.displaySize.x / (float) blurBitmapWidth, (AndroidUtilities.displaySize.y + AndroidUtilities.statusBarHeight) / (float) blurBitmapHeight);
+        blurBitmapMatrix.postTranslate(-blurPos[0], -blurPos[1]);
+        if (show.get() < 1 && useScale) {
+            final float scale = 1f / lerp(.75f, 1f, show.get());
+            blurBitmapMatrix.postScale(scale, scale, arrowX, arrowY);
+        }
+        blurBitmapShader.setLocalMatrix(blurBitmapMatrix);
+    }
+
 }

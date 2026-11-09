@@ -5,21 +5,18 @@ import android.content.DialogInterface;
 import android.os.Build;
 import android.util.TypedValue;
 import android.view.Gravity;
-import android.view.View;
-import android.widget.FrameLayout;
 import android.widget.LinearLayout;
 import android.widget.TextView;
-
-import com.google.android.exoplayer2.util.Consumer;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
-import org.telegram.messenger.UserObject;
+import org.telegram.messenger.Utilities;
 import org.telegram.messenger.browser.Browser;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.CheckBoxCell;
 import org.telegram.ui.Components.LayoutHelper;
 
@@ -31,18 +28,17 @@ public class WebAppDisclaimerAlert {
     private AlertDialog alert;
     private TextView positiveButton;
 
-    public static void show(Context context, Consumer<Boolean> consumer, TLRPC.User withSendMessage) {
+    public static void show(Context context, Utilities.Callback<Boolean> consumer, TLRPC.User withSendMessage, Runnable dismissed) {
         WebAppDisclaimerAlert alert = new WebAppDisclaimerAlert();
 
         AlertDialog.Builder alertDialog = new AlertDialog.Builder(context);
-        alertDialog.setTitle(LocaleController.getString("TermsOfUse", R.string.TermsOfUse));
+        alertDialog.setTitle(LocaleController.getString(R.string.TermsOfUse));
+
         LinearLayout linearLayout = new LinearLayout(context);
         linearLayout.setOrientation(LinearLayout.VERTICAL);
         TextView textView = new TextView(context);
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP) {
-            textView.setLetterSpacing(0.025f);
-        }
-        textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        textView.setLetterSpacing(0.025f);
+        ThemeBind.textColor(textView, Theme.key_dialogTextBlack);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
         linearLayout.addView(textView, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 24, 0, 24, 0));
 
@@ -61,16 +57,18 @@ public class WebAppDisclaimerAlert {
 //            });
 //        }
 
-        textView.setText(AndroidUtilities.replaceTags(LocaleController.getString("BotWebAppDisclaimerSubtitle", R.string.BotWebAppDisclaimerSubtitle)));
-        alert.cell.setText(AndroidUtilities.replaceSingleTag(LocaleController.getString("BotWebAppDisclaimerCheck", R.string.BotWebAppDisclaimerCheck), () -> {
-            Browser.openUrl(context, LocaleController.getString("WebAppDisclaimerUrl", R.string.WebAppDisclaimerUrl));
+        final boolean[] dismissing = new boolean[1];
+        textView.setText(AndroidUtilities.replaceTags(LocaleController.getString(R.string.BotWebAppDisclaimerSubtitle)));
+        alert.cell.setText(AndroidUtilities.replaceSingleTag(LocaleController.getString(R.string.BotWebAppDisclaimerCheck), () -> {
+            Browser.openUrl(context, LocaleController.getString(R.string.WebAppDisclaimerUrl));
         }), "", false, false);
         alertDialog.setView(linearLayout);
-        alertDialog.setPositiveButton(LocaleController.getString("Continue", R.string.Continue), (dialog, which) -> {
-            consumer.accept(true);
+        alertDialog.setPositiveButton(LocaleController.getString(R.string.Continue), (dialog, which) -> {
+            consumer.run(true);
+            dismissing[0] = true;
             dialog.dismiss();
         });
-        alertDialog.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), (dialog, which) -> {
+        alertDialog.setNegativeButton(LocaleController.getString(R.string.Cancel), (dialog, which) -> {
             dialog.dismiss();
         });
         alert.alert = alertDialog.create();
@@ -84,5 +82,13 @@ public class WebAppDisclaimerAlert {
             alert.positiveButton.animate().alpha(alert.cell.isChecked() ? 1f : 0.5f).start();
         });
         alert.cell.setBackground(Theme.createSelectorDrawable(Theme.getColor(Theme.key_listSelector), Theme.RIPPLE_MASK_ROUNDRECT_6DP));
+        alert.alert.setOnDismissListener(d -> {
+            if (!dismissing[0]) {
+                dismissing[0] = true;
+                if (dismissed != null) {
+                    dismissed.run();
+                }
+            }
+        });
     }
 }

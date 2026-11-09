@@ -5,7 +5,7 @@ import android.os.Build;
 import android.text.Editable;
 import android.text.Html;
 import android.text.Spannable;
-import android.text.SpannableString;
+import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.TextUtils;
 import android.text.style.StrikethroughSpan;
@@ -13,7 +13,7 @@ import android.text.style.StyleSpan;
 import android.text.style.URLSpan;
 import android.text.style.UnderlineSpan;
 
-import org.telegram.messenger.CodeHighlighting;
+import org.telegram.utils.code.highlight.CodeHighlighting;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.tgnet.TLRPC;
@@ -34,6 +34,7 @@ public class CopyUtilities {
     private final static int TYPE_SPOILER = 0;
     private final static int TYPE_MONO = 1;
     private final static int TYPE_QUOTE = 2;
+    private final static int TYPE_COLLAPSE = 3;
 
     public static Spannable fromHTML(String html) {
         Spanned spanned;
@@ -81,7 +82,7 @@ public class CopyUtilities {
                     } else {
                         entities.add(setEntityStartEnd(new TLRPC.TL_messageEntityPre(), start, end));
                     }
-                } else if (parsedSpan.type == TYPE_QUOTE) {
+                } else if (parsedSpan.type == TYPE_QUOTE || parsedSpan.type == TYPE_COLLAPSE) {
                     quotes.add(parsedSpan);
                 }
             } else if (span instanceof AnimatedEmojiSpan) {
@@ -92,7 +93,7 @@ public class CopyUtilities {
             }
         }
 
-        SpannableString spannable = new SpannableString(spanned.toString());
+        SpannableStringBuilder spannable = new SpannableStringBuilder(spanned.toString());
         MediaDataController.addTextStyleRuns(entities, spannable, spannable);
         for (int i = 0; i < spans.length; ++i) {
             Object span = spans[i];
@@ -126,7 +127,7 @@ public class CopyUtilities {
         }
         for (int i = 0; i < quotes.size(); ++i) {
             ParsedSpan span = quotes.get(i);
-            QuoteSpan.putQuote(spannable, spanned.getSpanStart(span), spanned.getSpanEnd(span));
+            QuoteSpan.putQuoteToEditable(spannable, spanned.getSpanStart(span), spanned.getSpanEnd(span), span.type == TYPE_COLLAPSE);
         }
         return spannable;
     }
@@ -273,7 +274,9 @@ public class CopyUtilities {
                 }
             } else if (tag.equals("pre")) {
                 if (opening) {
-                    String lang = HTMLTagAttributesHandler.getValue(attributes, "lang");
+                    String lang = HTMLTagAttributesHandler.getValue(attributes, "language");
+                    if (lang == null) lang = HTMLTagAttributesHandler.getValue(attributes, "lang");
+                    if (lang == null) lang = HTMLTagAttributesHandler.getValue(attributes, "lng");
                     output.setSpan(new ParsedSpan(TYPE_MONO, lang), output.length(), output.length(), Spanned.SPAN_MARK_MARK);
                     return true;
                 } else {
@@ -289,10 +292,28 @@ public class CopyUtilities {
                 }
             } else if (tag.equals("blockquote")) {
                 if (opening) {
-                    output.setSpan(new ParsedSpan(TYPE_QUOTE), output.length(), output.length(), Spanned.SPAN_MARK_MARK);
+                    final String className = HTMLTagAttributesHandler.getValue(attributes, "class");
+                    final boolean collapsed = HTMLTagAttributesHandler.getValue(attributes, "data-collapsed") != null
+                            || className != null && className.contains("telegram-collapsed-quote");
+                    output.setSpan(new ParsedSpan(collapsed ? TYPE_COLLAPSE : TYPE_QUOTE), output.length(), output.length(), Spanned.SPAN_MARK_MARK);
                     return true;
                 } else {
-                    ParsedSpan obj = getLast(output, ParsedSpan.class, TYPE_QUOTE);
+                    ParsedSpan obj = getLastQuote(output);
+                    if (obj != null) {
+                        int where = output.getSpanStart(obj);
+                        output.removeSpan(obj);
+                        if (where != output.length()) {
+                            output.setSpan(obj, where, output.length(), Spannable.SPAN_EXCLUSIVE_EXCLUSIVE);
+                        }
+                        return true;
+                    }
+                }
+            } else if (tag.equals("details")) {
+                if (opening) {
+                    output.setSpan(new ParsedSpan(TYPE_COLLAPSE), output.length(), output.length(), Spanned.SPAN_MARK_MARK);
+                    return true;
+                } else {
+                    ParsedSpan obj = getLast(output, ParsedSpan.class, TYPE_COLLAPSE);
                     if (obj != null) {
                         int where = output.getSpanStart(obj);
                         output.removeSpan(obj);
@@ -304,6 +325,18 @@ public class CopyUtilities {
                 }
             }
             return false;
+        }
+
+        private ParsedSpan getLastQuote(Editable text) {
+            ParsedSpan[] objs = text.getSpans(0, text.length(), ParsedSpan.class);
+            for (int i = objs.length - 1; i >= 0; i--) {
+                final ParsedSpan obj = objs[i];
+                if (text.getSpanFlags(obj) == Spannable.SPAN_MARK_MARK
+                        && (obj.type == TYPE_QUOTE || obj.type == TYPE_COLLAPSE)) {
+                    return obj;
+                }
+            }
+            return null;
         }
 
         private <T> T getLast(Editable text, Class<T> kind) {

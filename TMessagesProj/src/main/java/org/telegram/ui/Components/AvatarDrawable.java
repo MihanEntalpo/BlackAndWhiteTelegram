@@ -39,6 +39,7 @@ import org.telegram.messenger.UserObject;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 
 import java.util.ArrayList;
 
@@ -98,6 +99,9 @@ public class AvatarDrawable extends Drawable {
     public static final int AVATAR_TYPE_MY_NOTES = 22;
     public static final int AVATAR_TYPE_EXISTING_CHATS = 23;
     public static final int AVATAR_TYPE_NEW_CHATS = 24;
+    public static final int AVATAR_TYPE_PREMIUM = 25;
+    public static final int AVATAR_TYPE_STARS = 26;
+    public static final int AVATAR_TYPE_SUGGESTION = 27;
 
     /**
      * Matches {@link org.telegram.ui.Components.AvatarConstructorFragment#defaultColors}
@@ -125,7 +129,7 @@ public class AvatarDrawable extends Drawable {
         super();
         this.resourcesProvider = resourcesProvider;
         namePaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
-        namePaint.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
+        namePaint.setTypeface(AndroidUtilities.bold());
         namePaint.setTextSize(dp(18));
     }
 
@@ -198,7 +202,7 @@ public class AvatarDrawable extends Drawable {
     }
 
     public static int getProfileBackColorForId(long id, Theme.ResourcesProvider resourcesProvider) {
-        return Theme.getColor(Theme.key_avatar_backgroundActionBarBlue, resourcesProvider);
+        return Theme.getColor(Theme.key_windowBackgroundGray, resourcesProvider);
     }
 
     public static String colorName(int color) {
@@ -254,7 +258,7 @@ public class AvatarDrawable extends Drawable {
             color = color2 = Theme.getColor(Theme.key_chats_actionBackground);
         } else if (avatarType == AVATAR_TYPE_ARCHIVED) {
             color = color2 = getThemedColor(Theme.key_avatar_backgroundArchivedHidden);
-        } else if (avatarType == AVATAR_TYPE_REPLIES || avatarType == AVATAR_TYPE_SAVED || avatarType == AVATAR_TYPE_OTHER_CHATS) {
+        } else if (avatarType == AVATAR_TYPE_SUGGESTION || avatarType == AVATAR_TYPE_REPLIES || avatarType == AVATAR_TYPE_SAVED || avatarType == AVATAR_TYPE_OTHER_CHATS) {
             hasGradient = true;
             color = getThemedColor(Theme.key_avatar_backgroundSaved);
             color2 = getThemedColor(Theme.key_avatar_background2Saved);
@@ -267,6 +271,14 @@ public class AvatarDrawable extends Drawable {
             hasGradient = true;
             color = getThemedColor(Theme.keys_avatar_background[getColorIndex(5)]);
             color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(5)]);
+        } else if (avatarType == AVATAR_TYPE_PREMIUM) {
+            hasGradient = true;
+            color = getThemedColor(Theme.keys_avatar_background[getColorIndex(2)]);
+            color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(2)]);
+        } else if (avatarType == AVATAR_TYPE_STARS) {
+            hasGradient = true;
+            color = getThemedColor(Theme.keys_avatar_background[getColorIndex(1)]);
+            color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(1)]);
         } else if (avatarType == AVATAR_TYPE_FILTER_CONTACTS) {
             hasGradient = true;
             color = getThemedColor(Theme.keys_avatar_background[getColorIndex(5)]);
@@ -316,7 +328,47 @@ public class AvatarDrawable extends Drawable {
             color = getThemedColor(Theme.keys_avatar_background[getColorIndex(4)]);
             color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(4)]);
         }
-        needApplyColorAccent = avatarType != AVATAR_TYPE_ARCHIVED && avatarType != AVATAR_TYPE_SAVED && avatarType != AVATAR_TYPE_STORY && avatarType != AVATAR_TYPE_ANONYMOUS && avatarType != AVATAR_TYPE_REPLIES && avatarType != AVATAR_TYPE_OTHER_CHATS;
+        needApplyColorAccent = avatarType != AVATAR_TYPE_ARCHIVED && avatarType != AVATAR_TYPE_SAVED && avatarType != AVATAR_TYPE_STORY && avatarType != AVATAR_TYPE_ANONYMOUS && avatarType != AVATAR_TYPE_SUGGESTION && avatarType != AVATAR_TYPE_REPLIES && avatarType != AVATAR_TYPE_OTHER_CHATS;
+        avatarTypeColorsThemed = avatarType == AVATAR_TYPE_REGISTER || avatarType == AVATAR_TYPE_ARCHIVED || avatarType == AVATAR_TYPE_SUGGESTION || avatarType == AVATAR_TYPE_REPLIES || avatarType == AVATAR_TYPE_SAVED || avatarType == AVATAR_TYPE_OTHER_CHATS || avatarType == AVATAR_TYPE_STORY;
+        avatarTypeColor = color;
+        avatarTypeColor2 = color2;
+        avatarTypeColorsGeneration = ThemeBind.generation();
+    }
+
+    // colors picked by id in setInfo: re-read from the theme after a theme change (on draw), while still shown
+    private boolean idColorsThemed;
+    private int idColorIndex, idColor, idColor2, idColorsGeneration;
+
+    private boolean avatarTypeColorsThemed;
+    private int avatarTypeColor, avatarTypeColor2, avatarTypeColorsGeneration;
+
+    // re-reads the theme colors set by setAvatarType after a theme change, unless they were replaced since
+    private void refreshAvatarTypeColors() {
+        try {
+            if (color != avatarTypeColor || color2 != avatarTypeColor2) {
+                avatarTypeColorsThemed = false;
+                return;
+            }
+            final int c, c2;
+            if (avatarType == AVATAR_TYPE_REGISTER) {
+                c = c2 = Theme.getColor(Theme.key_chats_actionBackground);
+            } else if (avatarType == AVATAR_TYPE_ARCHIVED) {
+                c = c2 = getThemedColor(Theme.key_avatar_backgroundArchivedHidden);
+            } else if (avatarType == AVATAR_TYPE_SUGGESTION || avatarType == AVATAR_TYPE_REPLIES || avatarType == AVATAR_TYPE_SAVED || avatarType == AVATAR_TYPE_OTHER_CHATS) {
+                c = getThemedColor(Theme.key_avatar_backgroundSaved);
+                c2 = getThemedColor(Theme.key_avatar_background2Saved);
+            } else if (avatarType == AVATAR_TYPE_STORY) {
+                c = getThemedColor(Theme.key_stories_circle1);
+                c2 = getThemedColor(Theme.key_stories_circle2);
+            } else {
+                avatarTypeColorsThemed = false;
+                return;
+            }
+            color = avatarTypeColor = c;
+            color2 = avatarTypeColor2 = c2;
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
     }
 
     public void setArchivedAvatarHiddenProgress(float progress) {
@@ -384,6 +436,17 @@ public class AvatarDrawable extends Drawable {
         return text.substring(0, text.offsetByCodePoints(0, Math.min(text.codePointCount(0, text.length()), 1)));
     }
 
+    public void setInfo(long id) {
+        invalidateTextLayout = true;
+        hasGradient = true;
+        hasAdvancedGradient = false;
+        color = getThemedColor(Theme.keys_avatar_background[getColorIndex(id)]);
+        color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(id)]);
+        avatarType = AVATAR_TYPE_NORMAL;
+        drawDeleted = false;
+        getAvatarSymbols("", "", "", stringBuilder);
+    }
+
     public void setInfo(long id, String firstName, String lastName, String custom) {
         setInfo(id, firstName, lastName, custom, null, null);
     }
@@ -414,35 +477,7 @@ public class AvatarDrawable extends Drawable {
                 color2 = profileColor.getAvatarColor2();
             }
         } else if (customColor != null) {
-            if (customColor >= 14) {
-                MessagesController messagesController = MessagesController.getInstance(UserConfig.selectedAccount);
-                if (messagesController != null && messagesController.peerColors != null && messagesController.peerColors.getColor(customColor) != null) {
-                    final int peerColor = messagesController.peerColors.getColor(customColor).getColor1();
-                    if (advancedGradient) {
-                        int[] gradient = advancedGradients[getPeerColorIndex(peerColor)];
-                        this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
-                    } else {
-                        color = getThemedColor(Theme.keys_avatar_background[getPeerColorIndex(peerColor)]);
-                        color2 = getThemedColor(Theme.keys_avatar_background2[getPeerColorIndex(peerColor)]);
-                    }
-                } else {
-                    if (advancedGradient) {
-                        int[] gradient = advancedGradients[getColorIndex(customColor)];
-                        this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
-                    } else {
-                        color = getThemedColor(Theme.keys_avatar_background[getColorIndex(customColor)]);
-                        color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(customColor)]);
-                    }
-                }
-            } else {
-                if (advancedGradient) {
-                    int[] gradient = advancedGradients[getColorIndex(customColor)];
-                    this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
-                } else {
-                    color = getThemedColor(Theme.keys_avatar_background[getColorIndex(customColor)]);
-                    color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(customColor)]);
-                }
-            }
+            setPeerColor(customColor);
         } else {
             if (advancedGradient) {
                 int[] gradient = advancedGradients[getColorIndex(id)];
@@ -450,6 +485,11 @@ public class AvatarDrawable extends Drawable {
             } else {
                 color = getThemedColor(Theme.keys_avatar_background[getColorIndex(id)]);
                 color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(id)]);
+                idColorIndex = getColorIndex(id);
+                idColor = color;
+                idColor2 = color2;
+                idColorsThemed = true;
+                idColorsGeneration = ThemeBind.generation();
             }
         }
         needApplyColorAccent = id == 5; // Tinting manually set blue color
@@ -464,6 +504,52 @@ public class AvatarDrawable extends Drawable {
         }
 
         getAvatarSymbols(firstName, lastName, custom, stringBuilder);
+    }
+
+    public void setPeerColor(int id) {
+        if (advancedGradient != null) {
+            hasGradient = false;
+            hasAdvancedGradient = true;
+        } else {
+            hasGradient = true;
+            hasAdvancedGradient = false;
+        }
+        if (id >= 14) {
+            MessagesController messagesController = MessagesController.getInstance(UserConfig.selectedAccount);
+            if (messagesController != null && messagesController.peerColors != null && messagesController.peerColors.getColor(id) != null) {
+                final int peerColor = messagesController.peerColors.getColor(id).getColor1();
+                if (advancedGradient != null) {
+                    int[] gradient = advancedGradients[getPeerColorIndex(peerColor)];
+                    this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
+                } else {
+                    color = getThemedColor(Theme.keys_avatar_background[getPeerColorIndex(peerColor)]);
+                    color2 = getThemedColor(Theme.keys_avatar_background2[getPeerColorIndex(peerColor)]);
+                }
+            } else {
+                if (advancedGradient != null) {
+                    int[] gradient = advancedGradients[getColorIndex(id)];
+                    this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
+                } else {
+                    color = getThemedColor(Theme.keys_avatar_background[getColorIndex(id)]);
+                    color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(id)]);
+                }
+            }
+        } else {
+            if (advancedGradient != null) {
+                int[] gradient = advancedGradients[getColorIndex(id)];
+                this.advancedGradient.setColors(gradient[0], gradient[1], gradient[2], gradient[3]);
+            } else {
+                color = getThemedColor(Theme.keys_avatar_background[getColorIndex(id)]);
+                color2 = getThemedColor(Theme.keys_avatar_background2[getColorIndex(id)]);
+            }
+        }
+    }
+
+    public void setText(String text) {
+        invalidateTextLayout = true;
+        avatarType = AVATAR_TYPE_NORMAL;
+        drawDeleted = false;
+        getAvatarSymbols(text, null, null, stringBuilder);
     }
 
     public static void getAvatarSymbols(String firstName, String lastName, String custom, StringBuilder result) {
@@ -501,6 +587,21 @@ public class AvatarDrawable extends Drawable {
         }
     }
 
+    private Drawable customIconDrawable;
+    private int iconTx, iconTy;
+    public void setCustomIcon(Drawable drawable) {
+        customIconDrawable = drawable;
+    }
+
+    public void setIconTranslation(int tx, int ty) {
+        this.iconTx = tx;
+        this.iconTy = ty;
+    }
+
+    public Drawable getCustomIcon() {
+        return customIconDrawable;
+    }
+
     @Override
     public void draw(Canvas canvas) {
         Rect bounds = getBounds();
@@ -508,6 +609,19 @@ public class AvatarDrawable extends Drawable {
             return;
         }
         int size = bounds.width();
+        if (avatarTypeColorsThemed && avatarTypeColorsGeneration != ThemeBind.generation()) {
+            avatarTypeColorsGeneration = ThemeBind.generation();
+            refreshAvatarTypeColors();
+        }
+        if (idColorsThemed && idColorsGeneration != ThemeBind.generation()) {
+            idColorsGeneration = ThemeBind.generation();
+            if (avatarType == AVATAR_TYPE_NORMAL && color == idColor && color2 == idColor2 && idColorIndex >= 0 && idColorIndex < Theme.keys_avatar_background.length) {
+                color = idColor = getThemedColor(Theme.keys_avatar_background[idColorIndex]);
+                color2 = idColor2 = getThemedColor(Theme.keys_avatar_background2[idColorIndex]);
+            } else {
+                idColorsThemed = false; // colors replaced since (peer colors, setColor, avatar type): leave them
+            }
+        }
         namePaint.setColor(ColorUtils.setAlphaComponent(getThemedColor(Theme.key_avatar_text), alpha));
         Paint backgroundPaint = Theme.avatar_backgroundPaint;
         if (hasAdvancedGradient && advancedGradient != null) {
@@ -520,6 +634,7 @@ public class AvatarDrawable extends Drawable {
                 gradient = new LinearGradient(0, 0, 0, gradientBottom = bounds.height(), gradientColor1 = color, gradientColor2 = color2, Shader.TileMode.CLAMP);
             }
             backgroundPaint.setShader(gradient);
+            backgroundPaint.setAlpha(alpha);
         } else {
             backgroundPaint.setShader(null);
             backgroundPaint.setColor(ColorUtils.setAlphaComponent(getColor(), alpha));
@@ -549,16 +664,16 @@ public class AvatarDrawable extends Drawable {
                 canvas.drawCircle(size / 2.0f, size / 2.0f, size / 2.0f * archivedAvatarProgress, backgroundPaint);
                 if (Theme.dialogs_archiveAvatarDrawableRecolored) {
                     Theme.dialogs_archiveAvatarDrawable.beginApplyLayerColors();
-                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow1.**", Theme.getNonAnimatedColor(Theme.key_avatar_backgroundArchived));
-                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow2.**", Theme.getNonAnimatedColor(Theme.key_avatar_backgroundArchived));
+                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow1", Theme.getNonAnimatedColor(Theme.key_avatar_backgroundArchived));
+                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow2", Theme.getNonAnimatedColor(Theme.key_avatar_backgroundArchived));
                     Theme.dialogs_archiveAvatarDrawable.commitApplyLayerColors();
                     Theme.dialogs_archiveAvatarDrawableRecolored = false;
                 }
             } else {
                 if (!Theme.dialogs_archiveAvatarDrawableRecolored) {
                     Theme.dialogs_archiveAvatarDrawable.beginApplyLayerColors();
-                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow1.**", color);
-                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow2.**", color);
+                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow1", color);
+                    Theme.dialogs_archiveAvatarDrawable.setLayerColor("Arrow2", color);
                     Theme.dialogs_archiveAvatarDrawable.commitApplyLayerColors();
                     Theme.dialogs_archiveAvatarDrawableRecolored = true;
                 }
@@ -571,10 +686,12 @@ public class AvatarDrawable extends Drawable {
             Theme.dialogs_archiveAvatarDrawable.setBounds(x, y, x + w, y + h);
             Theme.dialogs_archiveAvatarDrawable.draw(canvas);
             canvas.restore();
-        } else if (avatarType != 0) {
+        } else if (avatarType != 0 || customIconDrawable != null) {
             Drawable drawable;
 
-            if (avatarType == AVATAR_TYPE_SAVED) {
+            if (customIconDrawable != null) {
+                drawable = customIconDrawable;
+            } else if (avatarType == AVATAR_TYPE_SAVED) {
                 drawable = Theme.avatarDrawables[0];
             } else if (avatarType == AVATAR_TYPE_FILTER_CONTACTS) {
                 drawable = Theme.avatarDrawables[2];
@@ -614,14 +731,20 @@ public class AvatarDrawable extends Drawable {
                 drawable = Theme.avatarDrawables[21];
             } else if (avatarType == AVATAR_TYPE_NEW_CHATS) {
                 drawable = Theme.avatarDrawables[20];
+            } else if (avatarType == AVATAR_TYPE_PREMIUM) {
+                drawable = Theme.avatarDrawables[22];
+            } else if (avatarType == AVATAR_TYPE_STARS) {
+                drawable = Theme.avatarDrawables[23];
+            } else if (avatarType == AVATAR_TYPE_SUGGESTION) {
+                drawable = Theme.avatarDrawables[24];
             } else {
                 drawable = Theme.avatarDrawables[9];
             }
             if (drawable != null) {
-                int w = (int) (drawable.getIntrinsicWidth() * scaleSize);
-                int h = (int) (drawable.getIntrinsicHeight() * scaleSize);
-                int x = (size - w) / 2;
-                int y = (size - h) / 2;
+                final int w = (int) (drawable.getIntrinsicWidth() * scaleSize);
+                final int h = (int) (drawable.getIntrinsicHeight() * scaleSize);
+                final int x = (size - w) / 2 + iconTx;
+                final int y = (size - h) / 2 + iconTy;
                 drawable.setBounds(x, y, x + w, y + h);
                 if (alpha != 255) {
                     drawable.setAlpha(alpha);
@@ -634,7 +757,10 @@ public class AvatarDrawable extends Drawable {
         } else if (drawDeleted && Theme.avatarDrawables[1] != null) {
             int w = Theme.avatarDrawables[1].getIntrinsicWidth();
             int h = Theme.avatarDrawables[1].getIntrinsicHeight();
-            if (w > size - dp(6) || h > size - dp(6)) {
+            if (isProfile) {
+                w *= scaleSize;
+                h *= scaleSize;
+            } else if (w > size - dp(6) || h > size - dp(6)) {
                 float scale = size / (float) dp(50);
                 w *= scale;
                 h *= scale;
@@ -648,7 +774,7 @@ public class AvatarDrawable extends Drawable {
                 invalidateTextLayout = false;
                 if (stringBuilder.length() > 0) {
                     CharSequence text = stringBuilder.toString().toUpperCase();
-                    text = Emoji.replaceEmoji(text, namePaint.getFontMetricsInt(), dp(16), true);
+                    text = Emoji.replaceEmoji(text, namePaint.getFontMetricsInt(), true);
                     if (textLayout == null || !TextUtils.equals(text, textLayout.getText())) {
                         try {
                             textLayout = new StaticLayout(text, namePaint, dp(100), Layout.Alignment.ALIGN_NORMAL, 1.0f, 0.0f, false);

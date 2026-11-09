@@ -1,6 +1,7 @@
 package org.telegram.ui.Components;
 
 import android.graphics.Canvas;
+import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
@@ -11,6 +12,7 @@ import android.text.style.ReplacementSpan;
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
+import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
@@ -18,14 +20,16 @@ import org.telegram.ui.ActionBar.Theme;
 
 public class ColoredImageSpan extends ReplacementSpan {
 
+    public boolean draw = true;
     int drawableColor;
     public Drawable drawable;
+    public boolean recolorDrawable = true;
 
     boolean usePaintColor = true;
     public boolean useLinkPaintColor = false;
     int colorKey;
     private int topOffset = 0;
-    private float translateX, translateY, rotate;
+    public float translateX, translateY, rotate;
     private float alpha = 1f;
     private int overrideColor;
 
@@ -86,9 +90,10 @@ public class ColoredImageSpan extends ReplacementSpan {
         translateY = ty;
     }
 
-    public void translate(float tx, float ty) {
+    public ColoredImageSpan translate(float tx, float ty) {
         translateX = tx;
         translateY = ty;
+        return this;
     }
 
     public void rotate(float r) {
@@ -121,22 +126,26 @@ public class ColoredImageSpan extends ReplacementSpan {
 
     @Override
     public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end, float x, int top, int y, int bottom, @NonNull Paint paint) {
+        if (!draw) return;
+
+        boolean drawableColorIsPaintColor = false;
         int color;
         if (checkColorDelegate != null) {
             checkColorDelegate.run();
-        } else {
+        } else if (recolorDrawable) {
             if (overrideColor != 0) {
                 color = overrideColor;
             } else if (useLinkPaintColor && paint instanceof TextPaint) {
                 color = ((TextPaint) paint).linkColor;
             } else if (usePaintColor) {
+                drawableColorIsPaintColor = true;
                 color = paint.getColor();
             } else {
                 color = Theme.getColor(colorKey);
             }
             if (drawableColor != color) {
                 drawableColor = color;
-                drawable.setColorFilter(new PorterDuffColorFilter(drawableColor, PorterDuff.Mode.MULTIPLY));
+                drawable.setColorFilter(new PorterDuffColorFilter(drawableColor, PorterDuff.Mode.SRC_IN));
             }
         }
 
@@ -160,17 +169,20 @@ public class ColoredImageSpan extends ReplacementSpan {
             if (rotate != 1f) {
                 canvas.rotate(rotate, drawable.getBounds().centerX(), drawable.getBounds().centerY());
             }
-            if (alpha != 1f || paint.getAlpha() != 0xFF) {
-                drawable.setAlpha((int) (alpha * paint.getAlpha()));
+            if (drawableColorIsPaintColor) {
+                drawable.setAlpha((int) (0xFF * alpha * (paint.getAlpha() / (float) Color.alpha(drawableColor))));
+            } else {
+                drawable.setAlpha((int) (paint.getAlpha() * alpha));
             }
             drawable.draw(canvas);
         }
         canvas.restore();
     }
 
-    public void setColorKey(int colorKey) {
+    public ColoredImageSpan setColorKey(int colorKey) {
         this.colorKey = colorKey;
         usePaintColor = colorKey < 0;
+        return this;
     }
 
     public void setTopOffset(int topOffset) {
@@ -181,17 +193,20 @@ public class ColoredImageSpan extends ReplacementSpan {
         this.checkColorDelegate = checkColorDelegate;
     }
 
-    public void setScale(float sx) {
+    public ColoredImageSpan setScale(float sx) {
         scaleX = sx;
+        return this;
     }
 
-    public void setScale(float sx, float sy) {
+    public ColoredImageSpan setScale(float sx, float sy) {
         scaleX = sx;
         scaleY = sy;
+        return this;
     }
 
-    public void setOverrideColor(int red) {
+    public ColoredImageSpan setOverrideColor(int red) {
         overrideColor = red;
+        return this;
     }
 
     public void setAlpha(float v) {

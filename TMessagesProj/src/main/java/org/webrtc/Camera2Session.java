@@ -29,6 +29,7 @@ import java.util.Arrays;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
 
+import org.telegram.ui.Stories.LivePlayer;
 import org.webrtc.CameraEnumerationAndroid.CaptureFormat;
 
 @TargetApi(21)
@@ -128,7 +129,7 @@ class Camera2Session implements CameraSession {
       try {
         camera.createCaptureSession(
             Arrays.asList(surface), new CaptureSessionCallback(), cameraThreadHandler);
-      } catch (CameraAccessException e) {
+      } catch (CameraAccessException | IllegalStateException | SecurityException e) {
         reportError("Failed to create capture session. " + e);
         return;
       }
@@ -179,7 +180,7 @@ class Camera2Session implements CameraSession {
         captureRequestBuilder.addTarget(surface);
         session.setRepeatingRequest(
             captureRequestBuilder.build(), new CameraCaptureCallback(), cameraThreadHandler);
-      } catch (CameraAccessException e) {
+      } catch (CameraAccessException | IllegalStateException | SecurityException e) {
         reportError("Failed to start capture request. " + e);
         return;
       }
@@ -204,9 +205,9 @@ class Camera2Session implements CameraSession {
         // Also, undo camera orientation, we report it as rotation instead.
         final VideoFrame modifiedFrame =
             new VideoFrame(CameraSession.createTextureBufferWithModifiedTransformMatrix(
-                               (TextureBufferImpl) frame.getBuffer(),
-                               /* mirror= */ isCameraFrontFacing,
-                               /* rotation= */ -cameraOrientation),
+                (TextureBufferImpl) frame.getBuffer(),
+                /* mirror= */ isCameraFrontFacing,
+                /* rotation= */ -cameraOrientation),
                 /* rotation= */ getFrameOrientation(), frame.getTimestampNs());
         events.onFrameCaptured(Camera2Session.this, modifiedFrame);
         modifiedFrame.release();
@@ -272,16 +273,16 @@ class Camera2Session implements CameraSession {
   }
 
   public static void create(CreateSessionCallback callback, Events events,
-      Context applicationContext, CameraManager cameraManager,
-      SurfaceTextureHelper surfaceTextureHelper, String cameraId, int width, int height,
-      int framerate) {
+                            Context applicationContext, CameraManager cameraManager,
+                            SurfaceTextureHelper surfaceTextureHelper, String cameraId, int width, int height,
+                            int framerate) {
     new Camera2Session(callback, events, applicationContext, cameraManager, surfaceTextureHelper,
         cameraId, width, height, framerate);
   }
 
   private Camera2Session(CreateSessionCallback callback, Events events, Context applicationContext,
-      CameraManager cameraManager, SurfaceTextureHelper surfaceTextureHelper, String cameraId,
-      int width, int height, int framerate) {
+                         CameraManager cameraManager, SurfaceTextureHelper surfaceTextureHelper, String cameraId,
+                         int width, int height, int framerate) {
     Logging.d(TAG, "Create new camera2 session on camera " + cameraId);
 
     constructionTimeNs = System.nanoTime();
@@ -414,7 +415,7 @@ class Camera2Session implements CameraSession {
   }
 
   private int getFrameOrientation() {
-    int rotation = orientationHelper.getOrientation();
+    int rotation = LivePlayer.recording != null ? 0 : orientationHelper.getOrientation();
     OrientationHelper.cameraOrientation = rotation;
     if (isCameraFrontFacing) {
       rotation = 360 - rotation;

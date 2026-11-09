@@ -98,18 +98,33 @@ public class StoryUploadingService extends Service implements NotificationCenter
             builder.setSmallIcon(android.R.drawable.stat_sys_upload);
             builder.setWhen(System.currentTimeMillis());
             builder.setChannelId(NotificationsController.OTHER_NOTIFICATIONS_CHANNEL);
-            builder.setContentTitle(LocaleController.getString("AppName", R.string.AppName));
-            builder.setTicker(LocaleController.getString("StoryUploading", R.string.StoryUploading));
-            builder.setContentText(LocaleController.getString("StoryUploading", R.string.StoryUploading));
+            builder.setContentTitle(LocaleController.getString(R.string.AppName));
+            builder.setTicker(LocaleController.getString(R.string.StoryUploading));
+            builder.setContentText(LocaleController.getString(R.string.StoryUploading));
         }
         currentProgress = 0;
         builder.setProgress(100, Math.round(100 * currentProgress), false);
-        startForeground(33, builder.build());
+        try {
+            startForeground(33, builder.build());
+        } catch (Throwable e) {
+            // ForegroundServiceStartNotAllowedException, e.g. when the dataSync time limit is exhausted
+            FileLog.e(e);
+        }
         try {
             NotificationManagerCompat.from(ApplicationLoader.applicationContext).notify(33, builder.build());
         } catch (Throwable e) {
             FileLog.e(e);
         }
         return Service.START_NOT_STICKY;
+    }
+
+    @Override
+    public void onTimeout(int startId, int fgsType) {
+        // dataSync time limit is exhausted (6 hours a day in background since Android 15), the service must stop now
+        FileLog.d("StoryUploadingService timeout, type = " + fgsType);
+        try {
+            stopForeground(true);
+        } catch (Throwable ignore) {}
+        stopSelf();
     }
 }

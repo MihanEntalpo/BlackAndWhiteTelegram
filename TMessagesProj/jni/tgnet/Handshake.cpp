@@ -206,9 +206,12 @@ inline bool check_prime(BIGNUM *p) {
     return result != 0;
 }
 
-inline bool isGoodPrime(BIGNUM *p, uint32_t g) {
+bool Handshake::isGoodPrime(BIGNUM *p, uint32_t g) {
     if (g < 2 || g > 7 || BN_num_bits(p) != 2048) {
         return false;
+    }
+    if (bnContext == nullptr) {
+        bnContext = BN_CTX_new();
     }
 
     BIGNUM *t = BN_new();
@@ -411,6 +414,12 @@ void Handshake::processHandshakeResponse_resPQ(TLObject *message, int64_t messag
 
         authServerNonce = new ByteArray(result->server_nonce.get());
 
+        if (result->pq == nullptr || result->pq->length != 8) {
+            if (LOGS_ENABLED) DEBUG_E("account%u dc%u handshake: invalid pq length, type = %d", currentDatacenter->instanceNum, currentDatacenter->datacenterId, handshakeType);
+            beginHandshake(false);
+            return;
+        }
+
         uint64_t pq = ((uint64_t) (result->pq->bytes[0] & 0xff) << 56) |
                       ((uint64_t) (result->pq->bytes[1] & 0xff) << 48) |
                       ((uint64_t) (result->pq->bytes[2] & 0xff) << 40) |
@@ -533,7 +542,9 @@ void Handshake::processHandshakeResponse_resPQ(TLObject *message, int64_t messag
 
             bool ok = false;
             uint32_t offset = encryptedDataSize + paddedDataSize + ivSize + SHA256_DIGEST_LENGTH;
-            size_t resLen = BN_bn2bin(rsaKey->n, innerDataBuffer->bytes() + offset);
+            const BIGNUM *n = NULL;
+            RSA_get0_key(rsaKey, &n, NULL, NULL);
+            size_t resLen = BN_bn2bin(n, innerDataBuffer->bytes() + offset);
             const auto shift = (256 - resLen);
 
             for (auto i = 0; i != 256; ++i) {
@@ -556,7 +567,10 @@ void Handshake::processHandshakeResponse_resPQ(TLObject *message, int64_t messag
         }
         BIGNUM *a = BN_bin2bn(innerDataBuffer->bytes(), encryptedDataSize, nullptr);
         BIGNUM *r = BN_new();
-        BN_mod_exp(r, a, rsaKey->e, rsaKey->n, bnContext);
+        const BIGNUM *n = NULL;
+        const BIGNUM *e = NULL;
+        RSA_get0_key(rsaKey, &n, &e, NULL);
+        BN_mod_exp(r, a, e, n, bnContext);
         uint32_t size = BN_num_bytes(r);
         auto rsaEncryptedData = new ByteArray(size >= 256 ? size : 256);
         BN_bn2bin(r, rsaEncryptedData->bytes + (size < 256 ? (256 - size) : 0));
@@ -590,6 +604,14 @@ void Handshake::processHandshakeResponse_serverDHParams(TLObject *message, int64
 
         TL_server_DH_params_ok *result = (TL_server_DH_params_ok *) message;
 
+        if (result->encrypted_answer == nullptr ||
+            result->encrypted_answer->length < SHA_DIGEST_LENGTH ||
+            result->encrypted_answer->length % AES_BLOCK_SIZE != 0) {
+            if (LOGS_ENABLED) DEBUG_E("account%u dc%u handshake: invalid encrypted DH params length, type = %d", currentDatacenter->instanceNum, currentDatacenter->datacenterId, handshakeType);
+            beginHandshake(false);
+            return;
+        }
+
         NativeByteBuffer *tmpAesKeyAndIv = BuffersStorage::getInstance().getFreeBuffer(84);
 
         NativeByteBuffer *newNonceAndServerNonce = BuffersStorage::getInstance().getFreeBuffer(authNewNonce->length + authServerNonce->length);
@@ -614,8 +636,8 @@ void Handshake::processHandshakeResponse_serverDHParams(TLObject *message, int64
         Datacenter::aesIgeEncryption(result->encrypted_answer->bytes, tmpAesKeyAndIv->bytes(), tmpAesKeyAndIv->bytes() + 32, false, false, result->encrypted_answer->length);
 
         bool hashVerified = false;
-        for (uint32_t i = 0; i < 16; i++) {
-            SHA1(result->encrypted_answer->bytes + SHA_DIGEST_LENGTH, result->encrypted_answer->length - i - SHA_DIGEST_LENGTH, tmpAesKeyAndIv->bytes() + 64);
+        for (uint32_t i = 0; i < 16 && SHA_DIGEST_LENGTH + i <= result->encrypted_answer->length; i++) {
+            SHA1(result->encrypted_answer->bytes + SHA_DIGEST_LENGTH, result->encrypted_answer->length - SHA_DIGEST_LENGTH - i, tmpAesKeyAndIv->bytes() + 64);
             if (!memcmp(tmpAesKeyAndIv->bytes() + 64, result->encrypted_answer->bytes, SHA_DIGEST_LENGTH)) {
                 hashVerified = true;
                 break;
@@ -634,8 +656,17 @@ void Handshake::processHandshakeResponse_serverDHParams(TLObject *message, int64
         TL_server_DH_inner_data *dhInnerData = TL_server_DH_inner_data::TLdeserialize(answerWithHash, constructor, currentDatacenter->instanceNum, error);
         delete answerWithHash;
 
-        if (error) {
+        if (error || dhInnerData == nullptr) {
             if (LOGS_ENABLED) DEBUG_E("account%u dc%u handshake: can't parse decoded DH params, type = %d", currentDatacenter->instanceNum, currentDatacenter->datacenterId, handshakeType);
+            beginHandshake(false);
+            return;
+        }
+
+        if (dhInnerData->nonce == nullptr ||
+            dhInnerData->server_nonce == nullptr ||
+            dhInnerData->dh_prime == nullptr ||
+            dhInnerData->g_a == nullptr) {
+            if (LOGS_ENABLED) DEBUG_E("account%u dc%u handshake: incomplete decoded DH params, type = %d", currentDatacenter->instanceNum, currentDatacenter->datacenterId, handshakeType);
             beginHandshake(false);
             return;
         }
@@ -657,7 +688,7 @@ void Handshake::processHandshakeResponse_serverDHParams(TLObject *message, int64
             if (LOGS_ENABLED) DEBUG_E("can't allocate BIGNUM p");
             exit(1);
         }
-        if (!isGoodPrime(p, dhInnerData->g)) {
+        if (!Handshake::isGoodPrime(p, dhInnerData->g)) {
             if (LOGS_ENABLED) DEBUG_E("account%u dc%u handshake: bad prime, type = %d", currentDatacenter->instanceNum, currentDatacenter->datacenterId, handshakeType);
             beginHandshake(false);
             BN_free(p);
@@ -826,9 +857,11 @@ void Handshake::processHandshakeResponse_serverDHParamsAnswer(TLObject *message,
                 handshakeRequest = nullptr;
             }
 
-            std::unique_ptr<TL_future_salt> salt = std::unique_ptr<TL_future_salt>(handshakeServerSalt);
             currentDatacenter->clearServerSalts(handshakeType == HandshakeTypeMediaTemp);
-            currentDatacenter->addServerSalt(salt, handshakeType == HandshakeTypeMediaTemp);
+            if (handshakeServerSalt != nullptr) {
+                std::unique_ptr<TL_future_salt> salt = std::unique_ptr<TL_future_salt>(handshakeServerSalt);
+                currentDatacenter->addServerSalt(salt, handshakeType == HandshakeTypeMediaTemp);
+            }
             handshakeServerSalt = nullptr;
 
             if (handshakeType == HandshakeTypePerm) {
@@ -868,7 +901,7 @@ void Handshake::processHandshakeResponse_serverDHParamsAnswer(TLObject *message,
                     request->encrypted_message = currentDatacenter->createRequestsData(array, nullptr, connection, true);
                 };
 
-                authKeyPendingRequestId = ConnectionsManager::getInstance(currentDatacenter->instanceNum).sendRequest(request, [&](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId) {
+                authKeyPendingRequestId = ConnectionsManager::getInstance(currentDatacenter->instanceNum).sendRequest(request, [&](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId, int32_t dcId) {
                     authKeyPendingMessageId = 0;
                     authKeyPendingRequestId = 0;
                     if (response != nullptr && typeid(*response) == typeid(TL_boolTrue)) {
@@ -984,7 +1017,7 @@ void Handshake::loadCdnConfig(Datacenter *datacenter) {
     loadingCdnKeys = true;
     auto request = new TL_help_getCdnConfig();
 
-    ConnectionsManager::getInstance(datacenter->instanceNum).sendRequest(request, [&, datacenter](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId) {
+    ConnectionsManager::getInstance(datacenter->instanceNum).sendRequest(request, [&, datacenter](TLObject *response, TL_error *error, int32_t networkType, int64_t responseTime, int64_t msgId, int32_t dcId) {
         if (response != nullptr) {
             auto config = (TL_cdnConfig *) response;
             size_t count = config->public_keys.size();
@@ -998,11 +1031,14 @@ void Handshake::loadCdnConfig(Datacenter *datacenter) {
                 BIO_write(keyBio, publicKey->public_key.c_str(), (int) publicKey->public_key.length());
                 RSA *rsaKey = PEM_read_bio_RSAPublicKey(keyBio, nullptr, nullptr, nullptr);
 
-                int nBytes = BN_num_bytes(rsaKey->n);
-                int eBytes = BN_num_bytes(rsaKey->e);
+                const BIGNUM *n = NULL;
+                const BIGNUM *e = NULL;
+                RSA_get0_key(rsaKey, &n, &e, NULL);
+                int nBytes = BN_num_bytes(n);
+                int eBytes = BN_num_bytes(e);
                 std::string nStr(nBytes, 0), eStr(eBytes, 0);
-                BN_bn2bin(rsaKey->n, (uint8_t *)&nStr[0]);
-                BN_bn2bin(rsaKey->e, (uint8_t *)&eStr[0]);
+                BN_bn2bin(n, (uint8_t *)&nStr[0]);
+                BN_bn2bin(e, (uint8_t *)&eStr[0]);
                 buffer->writeString(nStr);
                 buffer->writeString(eStr);
                 SHA1(buffer->bytes(), buffer->position(), sha1Buffer);

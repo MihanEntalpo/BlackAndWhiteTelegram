@@ -8,7 +8,11 @@
 
 package org.telegram.ui.Components;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.LocaleController.getString;
+
 import android.annotation.SuppressLint;
+import android.app.Activity;
 import android.content.ClipData;
 import android.content.ClipboardManager;
 import android.content.Context;
@@ -19,7 +23,6 @@ import android.os.Build;
 import android.os.Bundle;
 import android.text.Editable;
 import android.text.Layout;
-import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.StaticLayout;
@@ -27,7 +30,6 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.text.TextWatcher;
 import android.text.style.CharacterStyle;
-import android.util.Log;
 import android.util.TypedValue;
 import android.view.ActionMode;
 import android.view.Gravity;
@@ -38,33 +40,39 @@ import android.view.ViewGroup;
 import android.view.accessibility.AccessibilityNodeInfo;
 import android.view.inputmethod.EditorInfo;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import androidx.core.view.accessibility.AccessibilityNodeInfoCompat;
 
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.CodeHighlighting;
+import org.telegram.utils.code.highlight.CodeHighlighting;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.utils.CopyUtilities;
+import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.AlertDialogDecor;
+import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.FloatingToolbar;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
+import org.telegram.ui.LaunchActivity;
 
 import java.util.List;
 
-public class EditTextCaption extends EditTextBoldCursor {
+public class EditTextCaption extends EditTextBoldCursor implements FloatingToolbar.StyleDelegate {
 
     private static final int ACCESSIBILITY_ACTION_SHARE = 0x10000000;
 
     private String caption;
     private StaticLayout captionLayout;
+    private Text rightText;
     private int userNameLength;
     private int xOffset;
     private int yOffset;
-    private int triesCount = 0;
     private boolean copyPasteShowed;
     private int hintColor;
     private EditTextCaptionDelegate delegate;
@@ -74,6 +82,7 @@ public class EditTextCaption extends EditTextBoldCursor {
     private int lineCount;
     private boolean isInitLineCount;
     private final Theme.ResourcesProvider resourcesProvider;
+    private int themedQuoteColor;
     private AlertDialog creationLinkDialog;
     public boolean adaptiveCreateLinkDialog;
 
@@ -84,7 +93,7 @@ public class EditTextCaption extends EditTextBoldCursor {
     public EditTextCaption(Context context, Theme.ResourcesProvider resourcesProvider) {
         super(context);
         this.resourcesProvider = resourcesProvider;
-        quoteColor = Theme.getColor(Theme.key_chat_inQuote, resourcesProvider);
+        quoteColor = themedQuoteColor = Theme.getColor(Theme.key_chat_inQuote, resourcesProvider);
         addTextChangedListener(new TextWatcher() {
             @Override
             public void beforeTextChanged(CharSequence s, int start, int count, int after) {
@@ -128,8 +137,18 @@ public class EditTextCaption extends EditTextBoldCursor {
         delegate = editTextCaptionDelegate;
     }
 
+    protected void notifySpansChanged() {
+        if (delegate != null) {
+            delegate.onSpansChanged();
+        }
+    }
+
     public void setAllowTextEntitiesIntersection(boolean value) {
         allowTextEntitiesIntersection = value;
+    }
+
+    public boolean getAllowTextEntitiesIntersection() {
+        return allowTextEntitiesIntersection;
     }
 
     public void makeSelectedBold() {
@@ -169,7 +188,52 @@ public class EditTextCaption extends EditTextBoldCursor {
         applyTextStyleToSelection(new TextStyleSpan(run));
     }
 
+    // Toggle an inline style over the current selection, mirroring a formatting button: if the style
+    // already fully covers the selection it's removed, otherwise it's added. Mono is kept mutually
+    // exclusive with every other inline style, and sub/superscript exclude each other (same rules the
+    // rich editor uses), so there's no conflict between mono and the rest.
+    public void toggleStyleForSelection(int flag) {
+        final Editable editable = getText();
+        if (editable == null) {
+            return;
+        }
+        int start = getSelectionStart();
+        int end = getSelectionEnd();
+        if (start < 0 || end < 0) {
+            return;
+        }
+        if (start > end) {
+            final int tmp = start;
+            start = end;
+            end = tmp;
+        }
+        if (start >= end) {
+            return;
+        }
+        final boolean add = (getCurrentStyle(start, end) & flag) == 0;
+        if (add) {
+            int clearMask;
+            if (flag == TextStyleSpan.FLAG_STYLE_MONO) {
+                clearMask = TextStyleSpan.FLAG_STYLE_BOLD | TextStyleSpan.FLAG_STYLE_ITALIC | TextStyleSpan.FLAG_STYLE_UNDERLINE
+                    | TextStyleSpan.FLAG_STYLE_STRIKE | TextStyleSpan.FLAG_STYLE_SPOILER
+                    | TextStyleSpan.FLAG_STYLE_SUBSCRIPT | TextStyleSpan.FLAG_STYLE_SUPERSCRIPT;
+            } else {
+                clearMask = TextStyleSpan.FLAG_STYLE_MONO;
+                if (flag == TextStyleSpan.FLAG_STYLE_SUBSCRIPT) clearMask |= TextStyleSpan.FLAG_STYLE_SUPERSCRIPT;
+                else if (flag == TextStyleSpan.FLAG_STYLE_SUPERSCRIPT) clearMask |= TextStyleSpan.FLAG_STYLE_SUBSCRIPT;
+            }
+            removeStyle(clearMask, start, end);
+            addStyle(flag, start, end);
+        } else {
+            removeStyle(flag, start, end);
+        }
+    }
+
     public void makeSelectedQuote() {
+        makeSelectedQuote(false);
+    }
+
+    public void makeSelectedQuote(boolean collapse) {
         int start, end;
         if (selectionStart >= 0 && selectionEnd >= 0) {
             start = selectionStart;
@@ -179,7 +243,7 @@ public class EditTextCaption extends EditTextBoldCursor {
             start = getSelectionStart();
             end = getSelectionEnd();
         }
-        final int setSelection = QuoteSpan.putQuoteToEditable(getText(), start, end);
+        final int setSelection = QuoteSpan.putQuoteToEditable(getText(), start, end, collapse);
         if (setSelection >= 0) {
             setSelection(setSelection);
             resetFontMetricsCache();
@@ -188,36 +252,72 @@ public class EditTextCaption extends EditTextBoldCursor {
         invalidateSpoilers();
     }
 
-    public void makeSelectedUrl() {
-        AlertDialog.Builder builder;
-        if (adaptiveCreateLinkDialog) {
-            builder = new AlertDialogDecor.Builder(getContext(), resourcesProvider);
+    public void makeSelectedDate() {
+        int start, end;
+        if (selectionStart >= 0 && selectionEnd >= 0) {
+            start = selectionStart;
+            end = selectionEnd;
+            selectionStart = selectionEnd = -1;
         } else {
-            builder = new AlertDialog.Builder(getContext(), resourcesProvider);
+            start = getSelectionStart();
+            end = getSelectionEnd();
         }
-        builder.setTitle(LocaleController.getString("CreateLink", R.string.CreateLink));
 
-        final EditTextBoldCursor editText = new EditTextBoldCursor(getContext()) {
-            @Override
-            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(64), MeasureSpec.EXACTLY));
+        AlertsCreator.createFormattedDatePickerDialog(getContext(), (scheduleDate, flags) -> {
+            Editable editable = getText();
+
+            TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun();
+            run.flags |= TextStyleSpan.FLAG_STYLE_URL;
+            run.start = start;
+            run.end = end;
+
+            TLRPC.TL_messageEntityFormattedDate entity = new TLRPC.TL_messageEntityFormattedDate();
+            entity.date = scheduleDate;
+            entity.flags = flags;
+            entity.applyFlags();
+
+            try {
+                editable.setSpan(new FormattedDateSpan(editable.subSequence(start, end).toString(), run, entity), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            } catch (Exception ignore) {
+
             }
-        };
-        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
-        editText.setText("http://");
-        editText.setTextColor(getThemedColor(Theme.key_dialogTextBlack));
-        editText.setHintText(LocaleController.getString("URL", R.string.URL));
-        editText.setHeaderHintColor(getThemedColor(Theme.key_windowBackgroundWhiteBlueHeader));
-        editText.setSingleLine(true);
-        editText.setFocusable(true);
-        editText.setTransformHintToHeader(true);
-        editText.setLineColors(getThemedColor(Theme.key_windowBackgroundWhiteInputField), getThemedColor(Theme.key_windowBackgroundWhiteInputFieldActivated), getThemedColor(Theme.key_text_RedRegular));
-        editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
-        editText.setBackgroundDrawable(null);
-        editText.requestFocus();
-        editText.setPadding(0, 0, 0, 0);
-        builder.setView(editText);
+            if (delegate != null) {
+                delegate.onSpansChanged();
+            }
+        }, () -> {}, resourcesProvider);
+    }
 
+    public void translateSelected() {
+        int start, end;
+        if (selectionStart >= 0 && selectionEnd >= 0) {
+            start = selectionStart;
+            end = selectionEnd;
+            selectionStart = selectionEnd = -1;
+        } else {
+            start = getSelectionStart();
+            end = getSelectionEnd();
+        }
+
+        final CharSequence text = getText().subSequence(start, end);
+
+        final BaseFragment lastFragment = LaunchActivity.getSafeLastFragment();
+
+        new TranslateAlert3(getContext(), lastFragment != null ? lastFragment.getResourceProvider() : null)
+            .setText(text)
+            .setOnUse(translatedText -> {
+                getText().replace(start, end, translatedText);
+                setSelection(start, start + translatedText.length());
+            })
+            .show();
+
+        setSelection(start, end);
+    }
+
+    public void makeSelectedUrl() {
+        makeSelectedUrl(null);
+    }
+
+    public void makeSelectedUrl(Runnable onApplied) {
         final int start;
         final int end;
         if (selectionStart >= 0 && selectionEnd >= 0) {
@@ -228,37 +328,163 @@ public class EditTextCaption extends EditTextBoldCursor {
             start = getSelectionStart();
             end = getSelectionEnd();
         }
-
-        builder.setPositiveButton(LocaleController.getString("OK", R.string.OK), (dialogInterface, i) -> {
-            Editable editable = getText();
-            CharacterStyle[] spans = editable.getSpans(start, end, CharacterStyle.class);
-            if (spans != null && spans.length > 0) {
-                for (int a = 0; a < spans.length; a++) {
-                    CharacterStyle oldSpan = spans[a];
-                    if (!(oldSpan instanceof AnimatedEmojiSpan) && !(oldSpan instanceof QuoteSpan.QuoteStyleSpan)) {
-                        int spanStart = editable.getSpanStart(oldSpan);
-                        int spanEnd = editable.getSpanEnd(oldSpan);
-                        editable.removeSpan(oldSpan);
-                        if (spanStart < start) {
-                            editable.setSpan(oldSpan, spanStart, start, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-                        }
-                        if (spanEnd > end) {
-                            editable.setSpan(oldSpan, end, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        showInputDialog(
+            LocaleController.getString(R.string.CreateLink),
+            LocaleController.getString(R.string.URL),
+            "http://",
+            true,
+            url -> {
+                Editable editable = getText();
+                CharacterStyle[] spans = editable.getSpans(start, end, CharacterStyle.class);
+                if (spans != null && spans.length > 0) {
+                    for (CharacterStyle oldSpan : spans) {
+                        if (!(oldSpan instanceof AnimatedEmojiSpan) && !(oldSpan instanceof QuoteSpan.QuoteStyleSpan)) {
+                            int spanStart = editable.getSpanStart(oldSpan);
+                            int spanEnd = editable.getSpanEnd(oldSpan);
+                            editable.removeSpan(oldSpan);
+                            if (spanStart < start) {
+                                editable.setSpan(oldSpan, spanStart, start, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            }
+                            if (spanEnd > end) {
+                                editable.setSpan(oldSpan, end, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                            }
                         }
                     }
                 }
+                try {
+                    editable.setSpan(createUrlSpan(url), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                } catch (Exception ignore) {}
+                if (delegate != null) {
+                    delegate.onSpansChanged();
+                }
+                if (onApplied != null) {
+                    onApplied.run();
+                }
             }
-            try {
-                editable.setSpan(new URLSpanReplacement(editText.getText().toString()), start, end, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            } catch (Exception ignore) {
+        );
+    }
 
+    public interface InputDialogCallback {
+        void run(String value);
+    }
+
+    protected URLSpanReplacement createUrlSpan(String url) {
+        return new URLSpanReplacement(url);
+    }
+
+    /** Shared single-line editor that keeps an already-open keyboard in place when adaptive mode is enabled. */
+    public void showInputDialog(String title, String hint, String initial, boolean showPaste,
+                                InputDialogCallback callback) {
+        showInputDialog(title, hint, initial, showPaste, adaptiveCreateLinkDialog, callback);
+    }
+
+    public void showInputDialog(String title, String hint, String initial, boolean showPaste,
+                                boolean adaptive, InputDialogCallback callback) {
+        AlertDialog.Builder builder;
+        if (adaptive) {
+            builder = new AlertDialogDecor.Builder(getContext(), resourcesProvider);
+        } else {
+            builder = new AlertDialog.Builder(getContext(), resourcesProvider);
+        }
+        builder.setTitle(title);
+
+        FrameLayout container = new FrameLayout(getContext());
+        final EditTextBoldCursor editText = new EditTextBoldCursor(getContext()) {
+            @Override
+            protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(64), MeasureSpec.EXACTLY));
             }
-            if (delegate != null) {
-                delegate.onSpansChanged();
+        };
+        final String def = initial == null ? "" : initial;
+        editText.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 18);
+        editText.setText(def);
+        ThemeBind.textColor(editText, Theme.key_dialogTextBlack, resourcesProvider);
+        editText.setHintText(hint);
+        ThemeBind.editHeaderHintColor(editText, Theme.key_windowBackgroundWhiteBlueHeader, resourcesProvider);
+        editText.setSingleLine(true);
+        editText.setFocusable(true);
+        editText.setTransformHintToHeader(true);
+        ThemeBind.lineColors(editText, Theme.key_windowBackgroundWhiteInputField, Theme.key_windowBackgroundWhiteInputFieldActivated, Theme.key_text_RedRegular, resourcesProvider);
+        editText.setImeOptions(EditorInfo.IME_ACTION_DONE);
+        editText.setBackgroundDrawable(null);
+        editText.requestFocus();
+        editText.setPadding(0, 0, 0, 0);
+        ThemeBind.highlightColor(editText, Theme.key_chat_inTextSelectionHighlight, resourcesProvider);
+        ThemeBind.editHandlesColor(editText, Theme.key_chat_TextSelectionCursor, resourcesProvider);
+        container.addView(editText, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
+
+        TextView pasteTextView = new TextView(getContext());
+        pasteTextView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+        pasteTextView.setTypeface(AndroidUtilities.bold());
+        pasteTextView.setText(getString(R.string.Paste));
+        pasteTextView.setPadding(dp(10), 0, dp(10), 0);
+        pasteTextView.setGravity(Gravity.CENTER);
+        int textColor = getThemedColor(Theme.key_windowBackgroundWhiteBlueText2);
+        ThemeBind.textColor(pasteTextView, Theme.key_windowBackgroundWhiteBlueText2, resourcesProvider);
+        ThemeBind.selectorBackground(pasteTextView, Theme.createSimpleSelectorRoundRectDrawable(dp(6), Theme.multAlpha(textColor, .12f), Theme.multAlpha(textColor, .15f)), ThemeBind.multAlpha(Theme.key_windowBackgroundWhiteBlueText2, .12f), ThemeBind.multAlpha(Theme.key_windowBackgroundWhiteBlueText2, .15f), resourcesProvider);
+        ScaleStateListAnimator.apply(pasteTextView, .1f, 1.5f);
+        container.addView(pasteTextView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, 26, Gravity.RIGHT | Gravity.CENTER_VERTICAL, 0, 0, 24, 3));
+        pasteTextView.setVisibility(showPaste ? VISIBLE : GONE);
+
+        Runnable checkPaste = () -> {
+            ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            final boolean show = showPaste && (TextUtils.isEmpty(editText.getText()) || TextUtils.equals(editText.getText().toString(), def)) && clipboardManager != null && clipboardManager.hasPrimaryClip();
+            pasteTextView.animate()
+                .alpha(show ? 1f : 0f)
+                .scaleX(show ? 1f : .7f)
+                .scaleY(show ? 1f : .7f)
+                .setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT)
+                .setDuration(300)
+                .start();
+        };
+        pasteTextView.setOnClickListener(v -> {
+            ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+            CharSequence text = null;
+            try {
+                text = clipboardManager.getPrimaryClip().getItemAt(0).coerceToText(getContext());
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            if (text != null) {
+                editText.setText(text);
+                editText.setSelection(0, editText.getText().length());
+            }
+            checkPaste.run();
+        });
+        editText.addTextChangedListener(new TextWatcher() {
+            @Override
+            public void beforeTextChanged(CharSequence s, int start, int count, int after) {}
+            @Override
+            public void onTextChanged(CharSequence s, int start, int before, int count) {}
+            @Override
+            public void afterTextChanged(Editable s) {
+                checkPaste.run();
             }
         });
-        builder.setNegativeButton(LocaleController.getString("Cancel", R.string.Cancel), null);
-        if (adaptiveCreateLinkDialog) {
+
+        ClipboardManager clipboardManager = (ClipboardManager) getContext().getSystemService(Context.CLIPBOARD_SERVICE);
+        if (showPaste && TextUtils.equals(def, "http://") && clipboardManager != null && clipboardManager.hasPrimaryClip()) {
+            CharSequence text = null;
+            try {
+                text = clipboardManager.getPrimaryClip().getItemAt(0).coerceToText(getContext());
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+            if (text != null) {
+                editText.setText(text);
+                editText.setSelection(0, editText.getText().length());
+            }
+        }
+
+        checkPaste.run();
+
+        builder.setView(container);
+
+        builder.setPositiveButton(LocaleController.getString(R.string.OK), (dialogInterface, i) -> {
+            callback.run(editText.getText().toString().trim());
+        });
+        builder.setNegativeButton(LocaleController.getString(R.string.Cancel), null);
+        if (adaptive) {
             creationLinkDialog = builder.create();
             creationLinkDialog.setOnDismissListener(dialog -> {
                 creationLinkDialog = null;
@@ -289,9 +515,9 @@ public class EditTextCaption extends EditTextBoldCursor {
         }
     }
 
-    public boolean closeCreationLinkDialog() {
+    public boolean closeCreationLinkDialog(boolean invoked) {
         if (creationLinkDialog != null && creationLinkDialog.isShowing()) {
-            creationLinkDialog.dismiss();
+            if (invoked) creationLinkDialog.dismiss();
             return true;
         }
         return false;
@@ -304,6 +530,131 @@ public class EditTextCaption extends EditTextBoldCursor {
     public void setSelectionOverride(int start, int end) {
         selectionStart = start;
         selectionEnd = end;
+    }
+
+    private static final int[] STYLE_FLAGS = {
+        TextStyleSpan.FLAG_STYLE_BOLD,
+        TextStyleSpan.FLAG_STYLE_ITALIC,
+        TextStyleSpan.FLAG_STYLE_MONO,
+        TextStyleSpan.FLAG_STYLE_STRIKE,
+        TextStyleSpan.FLAG_STYLE_UNDERLINE,
+        TextStyleSpan.FLAG_STYLE_SPOILER,
+        TextStyleSpan.FLAG_STYLE_SUBSCRIPT,
+        TextStyleSpan.FLAG_STYLE_SUPERSCRIPT,
+    };
+
+    private static int spanStyleFlags(TextStyleSpan span) {
+        int flags = span.getStyleFlags();
+        if ((flags & TextStyleSpan.FLAG_STYLE_SPOILER_REVEALED) != 0) {
+            flags |= TextStyleSpan.FLAG_STYLE_SPOILER;
+        }
+        return flags;
+    }
+
+    @Override
+    public int getCurrentStyle(int start, int end) {
+        Editable editable = getText();
+        if (editable == null) {
+            return 0;
+        }
+        start = Math.max(0, start);
+        end = Math.min(end, editable.length());
+        if (start < 0 || end < 0 || start >= end) {
+            return 0;
+        }
+        TextStyleSpan[] spans = editable.getSpans(start, end, TextStyleSpan.class);
+        int result = 0;
+        for (int flag : STYLE_FLAGS) {
+            // spans aren't returned in position order, so loop to a fixpoint extending
+            // the covered range by any span of this flag that touches it
+            int covered = start;
+            boolean advanced = true;
+            while (advanced && covered < end) {
+                advanced = false;
+                for (int a = 0; a < spans.length; ++a) {
+                    if ((spanStyleFlags(spans[a]) & flag) == 0) {
+                        continue;
+                    }
+                    int spanStart = editable.getSpanStart(spans[a]);
+                    int spanEnd = editable.getSpanEnd(spans[a]);
+                    if (spanStart <= covered && spanEnd > covered) {
+                        covered = spanEnd;
+                        advanced = true;
+                    }
+                }
+            }
+            if (covered >= end) {
+                result |= flag;
+            }
+        }
+        return result;
+    }
+
+    @Override
+    public void addStyle(int flag, int start, int end) {
+        Editable editable = getText();
+        if (editable == null || start < 0 || end < 0 || start >= end) {
+            return;
+        }
+        end = Math.min(end, editable.length());
+        if (start >= end) {
+            return;
+        }
+        TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun();
+        run.flags = flag;
+        MediaDataController.addStyleToText(new TextStyleSpan(run), start, end, editable, true);
+        if ((flag & TextStyleSpan.FLAG_STYLE_SPOILER) != 0) {
+            invalidateSpoilers();
+        }
+        if (delegate != null) {
+            delegate.onSpansChanged();
+        }
+    }
+
+    @Override
+    public void removeStyle(int flag, int start, int end) {
+        Editable editable = getText();
+        if (editable == null || start < 0 || end < 0 || start >= end) {
+            return;
+        }
+        end = Math.min(end, editable.length());
+        int removeMask = flag;
+        if ((flag & TextStyleSpan.FLAG_STYLE_SPOILER) != 0) {
+            removeMask |= TextStyleSpan.FLAG_STYLE_SPOILER_REVEALED;
+        }
+        TextStyleSpan[] spans = editable.getSpans(start, end, TextStyleSpan.class);
+        for (int a = 0; a < spans.length; ++a) {
+            TextStyleSpan span = spans[a];
+            int spanFlags = span.getStyleFlags();
+            if ((spanFlags & removeMask) == 0) {
+                continue;
+            }
+            int spanStart = editable.getSpanStart(span);
+            int spanEnd = editable.getSpanEnd(span);
+            editable.removeSpan(span);
+            if (spanStart < start) {
+                TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun(span.getTextStyleRun());
+                editable.setSpan(new TextStyleSpan(run), spanStart, start, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            if (spanEnd > end) {
+                TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun(span.getTextStyleRun());
+                editable.setSpan(new TextStyleSpan(run), end, spanEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+            int interStart = Math.max(spanStart, start);
+            int interEnd = Math.min(spanEnd, end);
+            int newFlags = spanFlags & ~removeMask;
+            if (newFlags != 0 && interStart < interEnd) {
+                TextStyleSpan.TextStyleRun run = new TextStyleSpan.TextStyleRun(span.getTextStyleRun());
+                run.flags = newFlags;
+                editable.setSpan(new TextStyleSpan(run), interStart, interEnd, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+            }
+        }
+        if ((flag & TextStyleSpan.FLAG_STYLE_SPOILER) != 0) {
+            invalidateSpoilers();
+        }
+        if (delegate != null) {
+            delegate.onSpansChanged();
+        }
     }
 
     private void applyTextStyleToSelection(TextStyleSpan span) {
@@ -328,6 +679,9 @@ public class EditTextCaption extends EditTextBoldCursor {
             for (int i = 0; i < quotes.length; ++i) {
                 editable.removeSpan(quotes[i]);
                 editable.removeSpan(quotes[i].styleSpan);
+                if (quotes[i].collapsedSpan != null) {
+                    editable.removeSpan(quotes[i].collapsedSpan);
+                }
             }
             if (quotes.length > 0) {
                 invalidateQuotes(true);
@@ -458,6 +812,12 @@ public class EditTextCaption extends EditTextBoldCursor {
         } else if (itemId == R.id.menu_quote) {
             makeSelectedQuote();
             return true;
+        } else if (itemId == R.id.menu_date) {
+            makeSelectedDate();
+            return true;
+        } else if (itemId == R.id.menu_translate) {
+            translateSelected();
+            return true;
         }
         return false;
     }
@@ -515,6 +875,13 @@ public class EditTextCaption extends EditTextBoldCursor {
         }
     }
 
+    public boolean isNearRightCaption(int rightMargin) {
+        final Layout layout = getLayout();
+        if (layout == null || layout.getLineCount() <= 0) return false;
+        if (layout.getLineCount() > 1) return true;
+        return layout.getLineRight(0) + rightMargin >= getWidth() - getPaddingLeft() - getPaddingRight();
+    }
+
     public String getCaption() {
         return caption;
     }
@@ -528,6 +895,10 @@ public class EditTextCaption extends EditTextBoldCursor {
 
     @Override
     protected void onDraw(Canvas canvas) {
+        if (quoteColor == themedQuoteColor) {
+            // follow theme changes unless a custom quote color was set
+            quoteColor = themedQuoteColor = Theme.getColor(Theme.key_chat_inQuote, resourcesProvider);
+        }
         canvas.save();
         canvas.translate(0, offsetY);
         super.onDraw(canvas);
@@ -545,7 +916,18 @@ public class EditTextCaption extends EditTextBoldCursor {
         } catch (Exception e) {
             FileLog.e(e);
         }
+        if (rightText != null && length() != 0) {
+            final Layout layout = getLayout();
+            if (layout != null && layout.getLineCount() > 0) {
+                final float right = layout.getLineRight(0);
+                rightText.draw(canvas, right, getHeight() / 2f + dp(1), hintColor, 1.0f);
+            }
+        }
         canvas.restore();
+    }
+
+    public void setRightText(CharSequence text) {
+        this.rightText = new Text(text, 16, getTypeface());
     }
 
     @Override
@@ -564,14 +946,15 @@ public class EditTextCaption extends EditTextBoldCursor {
             }
         }
         if (hasSelection()) {
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_spoiler, LocaleController.getString("Spoiler", R.string.Spoiler)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_bold, LocaleController.getString("Bold", R.string.Bold)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_italic, LocaleController.getString("Italic", R.string.Italic)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_mono, LocaleController.getString("Mono", R.string.Mono)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_strike, LocaleController.getString("Strike", R.string.Strike)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_underline, LocaleController.getString("Underline", R.string.Underline)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_link, LocaleController.getString("CreateLink", R.string.CreateLink)));
-            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_regular, LocaleController.getString("Regular", R.string.Regular)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_spoiler, LocaleController.getString(R.string.Spoiler)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_bold, LocaleController.getString(R.string.Bold)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_italic, LocaleController.getString(R.string.Italic)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_mono, LocaleController.getString(R.string.Mono)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_strike, LocaleController.getString(R.string.Strike)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_underline, LocaleController.getString(R.string.Underline)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_link, LocaleController.getString(R.string.CreateLink)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_regular, LocaleController.getString(R.string.Regular)));
+            infoCompat.addAction(new AccessibilityNodeInfoCompat.AccessibilityActionCompat(R.id.menu_date, LocaleController.getString(R.string.FormattedDate)));
         }
     }
 
@@ -592,7 +975,7 @@ public class EditTextCaption extends EditTextBoldCursor {
             if (clipData != null && clipData.getItemCount() == 1 && clipData.getDescription().hasMimeType("text/html")) {
                 try {
                     String html = clipData.getItemAt(0).getHtmlText();
-                    Spannable pasted = CopyUtilities.fromHTML(html);
+                    SpannableStringBuilder pasted = new SpannableStringBuilder(CopyUtilities.fromHTML(html));
                     Emoji.replaceEmoji(pasted, getPaint().getFontMetricsInt(), false, null);
                     AnimatedEmojiSpan[] spans = pasted.getSpans(0, pasted.length(), AnimatedEmojiSpan.class);
                     if (spans != null) {
@@ -624,10 +1007,14 @@ public class EditTextCaption extends EditTextBoldCursor {
             int end = Math.min(getText().length(), getSelectionEnd());
             try {
                 AndroidUtilities.addToClipboard(getText().subSequence(start, end));
+                Activity activity = AndroidUtilities.findActivity(getContext());
+                activity.closeContextMenu();
+                if (floatingActionMode != null) {
+                    floatingActionMode.finish();
+                }
+                setSelection(start, end);
                 return true;
-            } catch (Exception e) {
-
-            }
+            } catch (Exception e) {}
         } else if (id == android.R.id.cut) {
             int start = Math.max(0, getSelectionStart());
             int end = Math.min(getText().length(), getSelectionEnd());
@@ -643,9 +1030,7 @@ public class EditTextCaption extends EditTextBoldCursor {
                 setText(stringBuilder);
                 setSelection(start, start);
                 return true;
-            } catch (Exception e) {
-
-            }
+            } catch (Exception e) {}
         }
         return super.onTextContextMenuItem(id);
     }

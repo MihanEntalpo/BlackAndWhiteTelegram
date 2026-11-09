@@ -41,9 +41,11 @@ import android.webkit.WebView;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
 
-import com.google.android.exoplayer2.C;
-import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.ui.AspectRatioFrameLayout;
+import androidx.annotation.Keep;
+
+import androidx.media3.common.C;
+import androidx.media3.exoplayer.ExoPlayer;
+import org.telegram.ui.AspectRatioFrameLayout;
 
 import org.json.JSONArray;
 import org.json.JSONObject;
@@ -435,6 +437,7 @@ public class WebPlayerView extends ViewGroup implements VideoPlayer.VideoPlayerD
             callJavaResultInterface = callJavaResult;
         }
 
+        @Keep
         @JavascriptInterface
         public void returnResultToJava(String value) {
             callJavaResultInterface.jsCallFinished(value);
@@ -2069,6 +2072,13 @@ public class WebPlayerView extends ViewGroup implements VideoPlayer.VideoPlayerD
         return initied;
     }
 
+    /** Same as the inline button while the player is shown in the floating window. */
+    public void exitFromInlineMode() {
+        if (isInline && inlineButton != null) {
+            inlineButton.callOnClick();
+        }
+    }
+
     public boolean isInline() {
         return isInline || switchingInlineMode;
     }
@@ -2087,12 +2097,12 @@ public class WebPlayerView extends ViewGroup implements VideoPlayer.VideoPlayerD
     }
 
     public static String getYouTubeVideoId(String url) {
-        Matcher matcher = youtubeIdRegex.matcher(url);
-        String id = null;
-        if (matcher.find()) {
-            id = matcher.group(1);
+        if (url == null) return null;
+        final Matcher matcher = youtubeIdRegex.matcher(url);
+        if (!matcher.find()) {
+            return null;
         }
-        return id;
+        return matcher.group(1);
     }
 
     public boolean canHandleUrl(String url) {

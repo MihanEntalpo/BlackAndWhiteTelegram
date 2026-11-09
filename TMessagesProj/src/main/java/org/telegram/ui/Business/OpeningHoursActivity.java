@@ -13,33 +13,26 @@ import android.view.View;
 import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
+import androidx.annotation.Nullable;
 
-import org.checkerframework.checker.units.qual.A;
 import org.telegram.messenger.AndroidUtilities;
-import org.telegram.messenger.BotWebViewVibrationEffect;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
-import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserObject;
-import org.telegram.messenger.Utilities;
-import org.telegram.tgnet.AbstractSerializedData;
-import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.ActionBar;
+import org.telegram.ui.ActionBar.SimpleActionBarDoneButton;
 import org.telegram.ui.ActionBar.ActionBarMenuItem;
-import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
-import org.telegram.ui.ActionBar.BottomSheet;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.NotificationsCheckCell;
 import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextCheckCell;
-import org.telegram.ui.Components.AlertsCreator;
-import org.telegram.ui.Components.BottomSheetWithRecyclerListView;
 import org.telegram.ui.Components.BulletinFactory;
-import org.telegram.ui.Components.CircularProgressDrawable;
-import org.telegram.ui.Components.CrossfadeDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.UItem;
@@ -47,12 +40,10 @@ import org.telegram.ui.Components.UniversalAdapter;
 import org.telegram.ui.Components.UniversalRecyclerView;
 
 import java.time.DayOfWeek;
-import java.time.ZoneId;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Calendar;
 import java.util.Collections;
-import java.util.TimeZone;
 
 public class OpeningHoursActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
@@ -61,19 +52,23 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
     private UniversalRecyclerView listView;
 
     private static final int done_button = 1;
-    private CrossfadeDrawable doneButtonDrawable;
-    private ActionBarMenuItem doneButton;
+    private SimpleActionBarDoneButton doneButton;
+
+    @Override
+    protected boolean useSimpleActionBar() {
+        return true;
+    }
 
     @Override
     public View createView(Context context) {
-        actionBar.setBackButtonImage(R.drawable.ic_ab_back);
-        actionBar.setAllowOverlayTitle(true);
-        actionBar.setTitle(getString(R.string.BusinessHours));
-        actionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
+        setHasOwnBackground(true);
+        simpleActionBar.setBackButtonImage(R.drawable.ic_ab_back);
+        simpleActionBar.setTitle(getString(R.string.BusinessHours));
+        simpleActionBar.setActionBarMenuOnItemClick(new ActionBar.ActionBarMenuOnItemClick() {
             @Override
             public void onItemClick(int id) {
                 if (id == -1) {
-                    if (onBackPressed()) {
+                    if (onBackPressed(true)) {
                         finishFragment();
                     }
                 } else if (id == done_button) {
@@ -82,16 +77,15 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
             }
         });
 
-        Drawable checkmark = context.getResources().getDrawable(R.drawable.ic_ab_done).mutate();
-        checkmark.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_actionBarDefaultIcon), PorterDuff.Mode.MULTIPLY));
-        doneButtonDrawable = new CrossfadeDrawable(checkmark, new CircularProgressDrawable(Theme.getColor(Theme.key_actionBarDefaultIcon)));
-        doneButton = actionBar.createMenu().addItemWithWidth(done_button, doneButtonDrawable, AndroidUtilities.dp(56), LocaleController.getString("Done", R.string.Done));
+        doneButton = simpleActionBar.createDoneButton(done_button, LocaleController.getString(R.string.Save));
         checkDone(false);
 
         FrameLayout contentView = new FrameLayout(context);
-        contentView.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundGray));
 
         listView = new UniversalRecyclerView(this, this::fillItems, this::onClick, null);
+        listView.setSections();
+        listView.adapter.setApplyBackground(false);
+        listView.setSectionsDrawBackground(true);
         contentView.addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
         setValue();
@@ -126,21 +120,14 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
     private void checkDone(boolean animated) {
         if (doneButton == null) return;
         final boolean hasChanges = hasChanges();
-        doneButton.setEnabled(hasChanges);
-        if (animated) {
-            doneButton.animate().alpha(hasChanges ? 1.0f : 0.0f).scaleX(hasChanges ? 1.0f : 0.0f).scaleY(hasChanges ? 1.0f : 0.0f).setDuration(180).start();
-        } else {
-            doneButton.setAlpha(hasChanges ? 1.0f : 0.0f);
-            doneButton.setScaleX(hasChanges ? 1.0f : 0.0f);
-            doneButton.setScaleY(hasChanges ? 1.0f : 0.0f);
-        }
+        doneButton.setActive(hasChanges, animated);
     }
 
     @Override
     public boolean onFragmentCreate() {
         TimezonesController.getInstance(currentAccount).load();
         timezoneId = TimezonesController.getInstance(currentAccount).getSystemTimezoneId();
-        getNotificationCenter().addObserver(this, NotificationCenter.userInfoDidLoad);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.userInfoDidLoad);
         return super.onFragmentCreate();
     }
 
@@ -200,8 +187,8 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         valueSet = true;
     }
 
-    public static ArrayList<TLRPC.TL_businessWeeklyOpen> adaptWeeklyOpen(ArrayList<TLRPC.TL_businessWeeklyOpen> hours, int utc_offset) {
-        ArrayList<TLRPC.TL_businessWeeklyOpen> array = new ArrayList<>(hours);
+    public static ArrayList<TL_account.TL_businessWeeklyOpen> adaptWeeklyOpen(ArrayList<TL_account.TL_businessWeeklyOpen> hours, int utc_offset) {
+        ArrayList<TL_account.TL_businessWeeklyOpen> array = new ArrayList<>(hours);
 
 //        // join together weeklies
 //        Collections.sort(array, (a, b) -> a.start_minute - b.start_minute);
@@ -219,10 +206,10 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
 //            }
 //        }
 
-        ArrayList<TLRPC.TL_businessWeeklyOpen> array2 = new ArrayList<>(array.size());
+        ArrayList<TL_account.TL_businessWeeklyOpen> array2 = new ArrayList<>(array.size());
         for (int i = 0; i < array.size(); ++i) {
-            TLRPC.TL_businessWeeklyOpen weekly = array.get(i);
-            TLRPC.TL_businessWeeklyOpen newWeekly = new TLRPC.TL_businessWeeklyOpen();
+            TL_account.TL_businessWeeklyOpen weekly = array.get(i);
+            TL_account.TL_businessWeeklyOpen newWeekly = new TL_account.TL_businessWeeklyOpen();
 
             if (utc_offset != 0) {
                 int start = weekly.start_minute % (24 * 60);
@@ -246,7 +233,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
                 } else {
                     newWeekly.start_minute = 0;
 
-                    newWeekly = new TLRPC.TL_businessWeeklyOpen();
+                    newWeekly = new TL_account.TL_businessWeeklyOpen();
                     newWeekly.start_minute = 24 * 7 * 60 + weekly.start_minute + utc_offset;
                     newWeekly.end_minute = (24 * 7 * 60 - 1);
                     array2.add(newWeekly);
@@ -258,7 +245,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
                 } else {
                     newWeekly.end_minute = 24 * 7 * 60 - 1;
 
-                    newWeekly = new TLRPC.TL_businessWeeklyOpen();
+                    newWeekly = new TL_account.TL_businessWeeklyOpen();
                     newWeekly.start_minute = 0;
                     newWeekly.end_minute = weekly.end_minute + utc_offset - (24 * 7 * 60 - 1);
                     array2.add(newWeekly);
@@ -270,13 +257,13 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         return array2;
     }
 
-    public static ArrayList<Period>[] getDaysHours(ArrayList<TLRPC.TL_businessWeeklyOpen> hours) {
+    public static ArrayList<Period>[] getDaysHours(ArrayList<TL_account.TL_businessWeeklyOpen> hours) {
         ArrayList<Period>[] days = new ArrayList[7];
         for (int i = 0; i < days.length; ++i) {
             days[i] = new ArrayList<>();
         }
         for (int i = 0; i < hours.size(); ++i) {
-            TLRPC.TL_businessWeeklyOpen period = hours.get(i);
+            TL_account.TL_businessWeeklyOpen period = hours.get(i);
             int day = (int) (period.start_minute / (24 * 60)) % 7;
             int start = period.start_minute % (24 * 60);
             int end = start + (period.end_minute - period.start_minute);
@@ -288,7 +275,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
 
             int m = start;
             for (int j = 0; j < hours.size(); ++j) {
-                TLRPC.TL_businessWeeklyOpen period = hours.get(j);
+                TL_account.TL_businessWeeklyOpen period = hours.get(j);
                 if (period.start_minute <= m && period.end_minute >= m) {
                     m = period.end_minute + 1;
                 }
@@ -324,14 +311,14 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         return days;
     }
 
-    public static ArrayList<TLRPC.TL_businessWeeklyOpen> fromDaysHours(ArrayList<Period>[] days) {
-        ArrayList<TLRPC.TL_businessWeeklyOpen> hours = new ArrayList<>();
+    public static ArrayList<TL_account.TL_businessWeeklyOpen> fromDaysHours(ArrayList<Period>[] days) {
+        ArrayList<TL_account.TL_businessWeeklyOpen> hours = new ArrayList<>();
         if (days != null) {
             for (int i = 0; i < days.length; ++i) {
                 if (days[i] != null) {
                     for (int j = 0; j < days[i].size(); ++j) {
                         Period period = days[i].get(j);
-                        TLRPC.TL_businessWeeklyOpen weekly = new TLRPC.TL_businessWeeklyOpen();
+                        TL_account.TL_businessWeeklyOpen weekly = new TL_account.TL_businessWeeklyOpen();
                         weekly.start_minute = i * (24 * 60) + period.start;
                         weekly.end_minute = i * (24 * 60) + period.end;
                         hours.add(weekly);
@@ -342,7 +329,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         return hours;
     }
 
-    public static String toString(int currentAccount, TLRPC.User user, TLRPC.TL_businessWorkHours business_work_hours) {
+    public static String toString(int currentAccount, TLRPC.User user, TL_account.TL_businessWorkHours business_work_hours) {
         if (business_work_hours == null) return null;
         ArrayList<OpeningHoursActivity.Period>[] days = OpeningHoursActivity.getDaysHours(business_work_hours.weekly_open);
         StringBuilder sb = new StringBuilder();
@@ -381,19 +368,19 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
     }
 
     private void processDone() {
-        if (doneButtonDrawable.getProgress() > 0f) return;
+        if (doneButton.isLoading()) return;
 
         if (!hasChanges()) {
             finishFragment();
             return;
         }
 
-        doneButtonDrawable.animateToProgress(1f);
+        doneButton.setLoading(true, true);
         TLRPC.UserFull userFull = getMessagesController().getUserFull(getUserConfig().getClientUserId());
-        TLRPC.TL_account_updateBusinessWorkHours req = new TLRPC.TL_account_updateBusinessWorkHours();
-        ArrayList<TLRPC.TL_businessWeeklyOpen> periods = fromDaysHours(value);
+        TL_account.updateBusinessWorkHours req = new TL_account.updateBusinessWorkHours();
+        ArrayList<TL_account.TL_businessWeeklyOpen> periods = fromDaysHours(value);
         if (enabled && !periods.isEmpty()) {
-            TLRPC.TL_businessWorkHours business_work_hours = new TLRPC.TL_businessWorkHours();
+            TL_account.TL_businessWorkHours business_work_hours = new TL_account.TL_businessWorkHours();
             business_work_hours.timezone_id = timezoneId;
             business_work_hours.weekly_open.addAll(periods);
 
@@ -413,11 +400,11 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
 
         getConnectionsManager().sendRequest(req, (res, err) -> AndroidUtilities.runOnUIThread(() -> {
             if (err != null) {
-                doneButtonDrawable.animateToProgress(0f);
+                doneButton.setLoading(false, true);
                 BulletinFactory.showError(err);
             } else if (res instanceof TLRPC.TL_boolFalse) {
                 if (getContext() == null) return;
-                doneButtonDrawable.animateToProgress(0f);
+                doneButton.setLoading(false, true);
                 BulletinFactory.of(this).createErrorBulletin(LocaleController.getString(R.string.UnknownError)).show();
             } else {
                 if (!isFinished && !finishing)
@@ -468,7 +455,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
             int hours = (time - min) / 60 % 24;
             Calendar rightNow = Calendar.getInstance();
             rightNow.set(0, 0, 0, hours, min);
-            String str = LocaleController.getInstance().formatterConstDay.format(rightNow.getTime());
+            String str = LocaleController.getInstance().getFormatterConstDay().format(rightNow.getTime());
             if (time > 24 * 60 && includeNextDay) {
                 return LocaleController.formatString(R.string.BusinessHoursNextDay, str);
             }
@@ -476,11 +463,11 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         }
     }
 
-    public static boolean is24x7(TLRPC.TL_businessWorkHours hours) {
+    public static boolean is24x7(TL_account.TL_businessWorkHours hours) {
         if (hours == null || hours.weekly_open.isEmpty()) return false;
         int last = 0;
         for (int i = 0; i < hours.weekly_open.size(); ++i) {
-            TLRPC.TL_businessWeeklyOpen period = hours.weekly_open.get(i);
+            TL_account.TL_businessWeeklyOpen period = hours.weekly_open.get(i);
             if (period.start_minute > last + 1) return false;
             last = period.end_minute;
         }
@@ -532,7 +519,7 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
     public static final int BUTTON_TIMEZONE = -2;
 
     private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-        items.add(UItem.asTopView(getString(R.string.BusinessHoursInfo), R.raw.biz_clock));
+        items.add(UItem.asTopView(getString(R.string.BusinessHours), getString(R.string.BusinessHoursInfo), R.raw.biz_clock));
         items.add(UItem.asCheck(BUTTON_SHOW, getString(R.string.BusinessHoursShow)).setChecked(enabled));
         items.add(UItem.asShadow(-100, null));
         if (enabled) {
@@ -622,45 +609,14 @@ public class OpeningHoursActivity extends BaseFragment implements NotificationCe
         }
     }
 
-//    private class TimezonesBottomSheet extends BottomSheetWithRecyclerListView {
-//        private String currentTimezoneId;
-//        private Utilities.Callback<String> whenSelectedTimezone;
-//        public TimezonesBottomSheet(BaseFragment fragment, String timezoneId, Utilities.Callback<String> whenSelected) {
-//            super(fragment, false, false);
-//            currentTimezoneId = timezoneId;
-//            whenSelectedTimezone = whenSelected;
-//            listView.setOnItemClickListener((view, position) -> {
-//                position -= 2;
-//                TimezonesController timezonesController = TimezonesController.getInstance(currentAccount);
-//                ArrayList<TLRPC.TL_timezone> timezones = timezonesController.getTimezones();
-//                if (position >= 0 && position < timezones.size()) {
-//                    if (whenSelectedTimezone != null) {
-//                        whenSelectedTimezone.run(timezones.get(position).id);
-//                    }
-//                    dismiss();
-//                }
-//            });
-//        }
-//
-//        @Override
-//        protected CharSequence getTitle() {
-//            return getString(R.string.BusinessHoursTimezonePicker);
-//        }
-//
-//        @Override
-//        protected RecyclerListView.SelectionAdapter createAdapter() {
-//            return new UniversalAdapter(getContext(), currentAccount, this::fillItems, getResourceProvider());
-//        }
-//
-//        private void fillItems(ArrayList<UItem> items, UniversalAdapter adapter) {
-//            items.add(UItem.asHeader(getString(R.string.BusinessHoursTimezonePicker)));
-//
-//            TimezonesController timezonesController = TimezonesController.getInstance(currentAccount);
-//            ArrayList<TLRPC.TL_timezone> timezones = timezonesController.getTimezones();
-//            for (int i = 0; i < timezones.size(); ++i) {
-//                items.add(UItem.asCheck(i, timezonesController.getTimezoneName(timezones.get(i), true)).setChecked(TextUtils.equals(currentTimezoneId, timezones.get(i).id)));
-//            }
-//        }
-//    }
+    @Override
+    public boolean isSupportEdgeToEdge() {
+        return true;
+    }
 
+    @Nullable
+    @Override
+    protected RecyclerListView getListViewForSimpleGlass() {
+        return listView;
+    }
 }

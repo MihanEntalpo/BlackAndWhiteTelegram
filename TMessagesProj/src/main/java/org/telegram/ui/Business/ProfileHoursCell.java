@@ -1,7 +1,6 @@
 package org.telegram.ui.Business;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
-import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.LocaleController.formatPluralString;
 import static org.telegram.messenger.LocaleController.formatString;
 import static org.telegram.messenger.LocaleController.getString;
@@ -11,7 +10,6 @@ import android.graphics.Canvas;
 import android.graphics.Paint;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
-import android.text.StaticLayout;
 import android.util.TypedValue;
 import android.view.Gravity;
 import android.view.MotionEvent;
@@ -22,27 +20,25 @@ import android.widget.ImageView;
 import android.widget.LinearLayout;
 import android.widget.TextView;
 
-import com.google.android.exoplayer2.source.dash.manifest.Period;
-
-import org.checkerframework.checker.units.qual.A;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Components.AnimatedTextView;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.ClickableAnimatedTextView;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.UItem;
+import org.telegram.ui.Components.UniversalAdapter;
+import org.telegram.ui.Components.UniversalRecyclerView;
 
 import java.time.DayOfWeek;
-import java.time.Instant;
-import java.time.ZoneId;
 import java.time.format.TextStyle;
 import java.util.ArrayList;
 import java.util.Calendar;
-import java.util.Map;
-import java.util.TimeZone;
 
 public class ProfileHoursCell extends LinearLayout {
 
@@ -86,7 +82,7 @@ public class ProfileHoursCell extends LinearLayout {
                 labelText[i] = new TextView(context);
                 labelText[i].setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
                 labelText[i].setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
-                labelText[i].setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+                ThemeBind.textColor(labelText[i], Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
                 line.addView(labelText[i], LayoutHelper.createFrameRelatively(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.START | Gravity.TOP, 0, 33, 0, 10));
 
                 todayTimeTextContainer2 = new LinearLayout(context);
@@ -97,7 +93,7 @@ public class ProfileHoursCell extends LinearLayout {
                 for (int a = 0; a < 2; ++a) {
                     timeText[i][a] = new TextView(context);
                     timeText[i][a].setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-                    timeText[i][a].setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+                    ThemeBind.textColor(timeText[i][a], Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
                     timeText[i][a].setGravity(LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT);
                     todayTimeTextContainer.addView(timeText[i][a], LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 0, 0, 20, 0));
                 }
@@ -105,7 +101,7 @@ public class ProfileHoursCell extends LinearLayout {
                 for (int a = 0; a < 2; ++a) {
                     labelTimeText[a] = new TextView(context);
                     labelTimeText[a].setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-                    labelTimeText[a].setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+                    ThemeBind.textColor(labelTimeText[a], Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
                     labelTimeText[a].setGravity(LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT);
                     todayTimeTextContainer.addView(labelTimeText[a], LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL, 0, 0, 20, 0));
                 }
@@ -115,7 +111,7 @@ public class ProfileHoursCell extends LinearLayout {
                 arrowView.setScaleX(0.6f);
                 arrowView.setScaleY(0.6f);
                 arrowView.setImageResource(R.drawable.arrow_more);
-                arrowView.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider), PorterDuff.Mode.SRC_IN));
+                ThemeBind.colorFilter(arrowView, Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider, PorterDuff.Mode.SRC_IN);
                 todayTimeTextContainer.addView(arrowView, LayoutHelper.createFrameRelatively(20, 20, Gravity.CENTER_VERTICAL | Gravity.END));
 
                 todayTimeTextContainer2.addView(todayTimeTextContainer, LayoutHelper.createLinearRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
@@ -134,14 +130,14 @@ public class ProfileHoursCell extends LinearLayout {
                 todayTimeContainer.addView(todayTimeTextContainer2, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.END | Gravity.BOTTOM, 0, 0, 0, 0));
                 line.addView(todayTimeContainer, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.END | Gravity.BOTTOM, 0, 0, 0, 12));
 
-                addView(lines[i] = line, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, 22, 0, 33 - 20, 0));
+                addView(lines[i] = line, LayoutHelper.createFrameRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, 18, 0, (18 + 10) - 20, 0));
             } else {
                 LinearLayout line = new LinearLayout(context);
                 line.setOrientation(HORIZONTAL);
 
                 labelText[i] = new TextView(context);
                 labelText[i].setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-                labelText[i].setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteBlackText, resourcesProvider));
+                ThemeBind.textColor(labelText[i], Theme.key_windowBackgroundWhiteBlackText, resourcesProvider);
                 labelText[i].setGravity(LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT);
 
                 FrameLayout timeTextContainer = new FrameLayout(context);
@@ -149,7 +145,7 @@ public class ProfileHoursCell extends LinearLayout {
                 for (int a = 0; a < 2; ++a) {
                     timeText[i][a] = new TextView(context);
                     timeText[i][a].setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-                    timeText[i][a].setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider));
+                    ThemeBind.textColor(timeText[i][a], Theme.key_windowBackgroundWhiteGrayText2, resourcesProvider);
                     timeText[i][a].setGravity(LocaleController.isRTL ? Gravity.LEFT : Gravity.RIGHT);
                     timeTextContainer.addView(timeText[i][a], LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
                 }
@@ -162,7 +158,7 @@ public class ProfileHoursCell extends LinearLayout {
                     line.addView(timeTextContainer, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.RIGHT | Gravity.TOP));
                 }
 
-                addView(lines[i] = line, LayoutHelper.createLinearRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, 22, i == 1 ? 1f : 11.66f, 33, i == 6 ? 16.66f : 0));
+                addView(lines[i] = line, LayoutHelper.createLinearRelatively(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.LEFT, 18, i == 1 ? 1f : 11.66f, 18 + 10, i == 6 ? 16.66f : 0));
             }
         }
 
@@ -187,7 +183,7 @@ public class ProfileHoursCell extends LinearLayout {
     private boolean firstAfterAttach = true;
     private boolean needDivider;
     private boolean expanded;
-    public void set(TLRPC.TL_businessWorkHours value, boolean expanded, boolean showInMyTimezone, boolean divider) {
+    public void set(TL_account.TL_businessWorkHours value, boolean expanded, boolean showInMyTimezone, boolean divider) {
         this.expanded = expanded;
         this.needDivider = divider;
 
@@ -238,18 +234,18 @@ public class ProfileHoursCell extends LinearLayout {
         }
         firstAfterAttach = false;
 
-        ArrayList<TLRPC.TL_businessWeeklyOpen> weekly_open = new ArrayList<>(value.weekly_open);
+        ArrayList<TL_account.TL_businessWeeklyOpen> weekly_open = new ArrayList<>(value.weekly_open);
         ArrayList<OpeningHoursActivity.Period>[] localDays = OpeningHoursActivity.getDaysHours(weekly_open);
 
         int nowWeekday = (7 + calendar.get(Calendar.DAY_OF_WEEK) - 2) % 7;
         int nowHours = calendar.get(Calendar.HOUR_OF_DAY);
         int nowMinutes = calendar.get(Calendar.MINUTE);
 
-        ArrayList<TLRPC.TL_businessWeeklyOpen> adapted_weekly_open = OpeningHoursActivity.adaptWeeklyOpen(value.weekly_open, utcOffset);
+        ArrayList<TL_account.TL_businessWeeklyOpen> adapted_weekly_open = OpeningHoursActivity.adaptWeeklyOpen(value.weekly_open, utcOffset);
         boolean open_now = false;
         int nowPeriodTime = nowMinutes + nowHours * 60 + nowWeekday * (24 * 60);
         for (int i = 0; i < adapted_weekly_open.size(); ++i) {
-            TLRPC.TL_businessWeeklyOpen weeklyPeriod = adapted_weekly_open.get(i);
+            TL_account.TL_businessWeeklyOpen weeklyPeriod = adapted_weekly_open.get(i);
             if (
                 nowPeriodTime >= weeklyPeriod.start_minute && nowPeriodTime <= weeklyPeriod.end_minute ||
                 nowPeriodTime + (7 * 24 * 60) >= weeklyPeriod.start_minute && nowPeriodTime + (7 * 24 * 60) <= weeklyPeriod.end_minute ||
@@ -262,7 +258,7 @@ public class ProfileHoursCell extends LinearLayout {
         ArrayList<OpeningHoursActivity.Period>[] myDays = OpeningHoursActivity.getDaysHours(adapted_weekly_open);
 
         textView.setText(getString(open_now ? R.string.BusinessHoursProfileNowOpen : R.string.BusinessHoursProfileNowClosed));
-        textView.setTextColor(Theme.getColor(open_now ? Theme.key_avatar_nameInMessageGreen : Theme.key_text_RedRegular, resourcesProvider));
+        ThemeBind.textColor(textView, open_now ? Theme.key_avatar_nameInMessageGreen : Theme.key_text_RedRegular, resourcesProvider);
 
         int lastTodayLinesHeight = todayLinesHeight;
         int lastTodayLinesCount = todayLinesCount;
@@ -288,7 +284,7 @@ public class ProfileHoursCell extends LinearLayout {
                     if (i == 0 && !open_now && k == 1) {
                         int opensPeriodTime = -1;
                         for (int j = 0; j < adapted_weekly_open.size(); ++j) {
-                            TLRPC.TL_businessWeeklyOpen weekly = adapted_weekly_open.get(j);
+                            TL_account.TL_businessWeeklyOpen weekly = adapted_weekly_open.get(j);
                             if (nowPeriodTime < weekly.start_minute) {
                                 opensPeriodTime = weekly.start_minute;
                                 break;
@@ -375,5 +371,46 @@ public class ProfileHoursCell extends LinearLayout {
     @Override
     public boolean dispatchTouchEvent(MotionEvent ev) {
         return super.dispatchTouchEvent(ev);
+    }
+
+    public static final class Factory extends UItem.UItemFactory<ProfileHoursCell> {
+        static { setup(new Factory()); }
+
+        @Override
+        public ProfileHoursCell createView(Context context, RecyclerListView listView, int currentAccount, int classGuid, Theme.ResourcesProvider resourcesProvider) {
+            return new ProfileHoursCell(context, resourcesProvider);
+        }
+
+        @Override
+        public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
+            final ProfileHoursCell cell = (ProfileHoursCell) view;
+            cell.setId(item.id);
+            cell.setOnTimezoneSwitchClick(item.clickCallback);
+            cell.set(
+                (TL_account.TL_businessWorkHours) item.object,
+                item.locked, item.accent,
+                divider
+            );
+        }
+
+        public static UItem of(int id, TL_account.TL_businessWorkHours value, boolean expanded, boolean showInMyTimezone, View.OnClickListener onTimezoneClick) {
+            final UItem item = UItem.ofFactory(Factory.class);
+            item.id = id;
+            item.object = value;
+            item.locked = expanded;
+            item.accent = showInMyTimezone;
+            item.clickCallback = onTimezoneClick;
+            return item;
+        }
+
+        @Override
+        public boolean equals(UItem a, UItem b) {
+            return a.id == b.id;
+        }
+
+        @Override
+        public boolean contentsEquals(UItem a, UItem b) {
+            return a.accent == b.accent && a.locked == b.locked;
+        }
     }
 }

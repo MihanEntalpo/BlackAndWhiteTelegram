@@ -8,6 +8,8 @@
 
 package org.telegram.ui.Cells;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.text.TextUtils;
@@ -19,6 +21,7 @@ import android.widget.TextView;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LocaleController;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.RadioButton;
 
@@ -40,12 +43,12 @@ public class LanguageCell extends FrameLayout {
         setWillNotDraw(false);
 
         radioButton = new RadioButton(context);
-        radioButton.setSize(AndroidUtilities.dp(20));
-        radioButton.setColor(Theme.getColor(Theme.key_dialogRadioBackground), Theme.getColor(Theme.key_dialogRadioBackgroundChecked));
+        radioButton.setSize(dp(20));
+        ThemeBind.radioColors(radioButton, Theme.key_dialogRadioBackground, Theme.key_dialogRadioBackgroundChecked);
         addView(radioButton, LayoutHelper.createFrame(22, 22, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.CENTER_VERTICAL, (LocaleController.isRTL ? 0 : 20), 0, (LocaleController.isRTL ? 20 : 0), 0));
 
         textView = new TextView(context);
-        textView.setTextColor(Theme.getColor(Theme.key_dialogTextBlack));
+        ThemeBind.textColor(textView, Theme.key_dialogTextBlack);
         textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
         textView.setSingleLine(true);
         textView.setEllipsize(TextUtils.TruncateAt.END);
@@ -53,7 +56,7 @@ public class LanguageCell extends FrameLayout {
         addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, (LocaleController.isRTL ? Gravity.RIGHT : Gravity.LEFT) | Gravity.TOP, LocaleController.isRTL ? marginEndDp : marginStartDp, 0, LocaleController.isRTL ? marginStartDp : marginEndDp, 17));
 
         textView2 = new TextView(context);
-        textView2.setTextColor(Theme.getColor(Theme.key_dialogTextGray3));
+        ThemeBind.textColor(textView2, Theme.key_dialogTextGray3);
         textView2.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 13);
         textView2.setSingleLine(true);
         textView2.setEllipsize(TextUtils.TruncateAt.END);
@@ -63,7 +66,7 @@ public class LanguageCell extends FrameLayout {
 
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(AndroidUtilities.dp(60) + (needDivider ? 1 : 0), MeasureSpec.EXACTLY));
+        super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), MeasureSpec.makeMeasureSpec(dp(60) + (needDivider ? 1 : 0), MeasureSpec.EXACTLY));
     }
 
     public void setLanguage(LocaleController.LocaleInfo language, String desc, boolean divider) {
@@ -92,7 +95,7 @@ public class LanguageCell extends FrameLayout {
     @Override
     protected void onDraw(Canvas canvas) {
         if (needDivider) {
-            canvas.drawLine(LocaleController.isRTL ? 0 : AndroidUtilities.dp(marginStartDp - 3), getMeasuredHeight() - 1, getMeasuredWidth() - (LocaleController.isRTL ? AndroidUtilities.dp(marginStartDp - 3) : 0), getMeasuredHeight() - 1, Theme.dividerPaint);
+            canvas.drawLine(LocaleController.isRTL ? 0 : dp(marginStartDp - 3), getMeasuredHeight() - 1, getMeasuredWidth() - (LocaleController.isRTL ? dp(marginStartDp - 3) : 0), getMeasuredHeight() - 1, Theme.dividerPaint);
         }
     }
 }

@@ -1,41 +1,30 @@
 package org.telegram.messenger;
 
 import android.Manifest;
-import android.annotation.SuppressLint;
 import android.app.Activity;
-import android.app.Notification;
 import android.app.PendingIntent;
-import android.content.BroadcastReceiver;
 import android.content.Context;
 import android.content.Intent;
-import android.content.IntentFilter;
 import android.content.SharedPreferences;
-import android.content.pm.PackageManager;
-import android.database.Cursor;
-import android.net.Uri;
 import android.os.Build;
-import android.telecom.PhoneAccountHandle;
-import android.telephony.CellInfo;
 import android.telephony.SmsManager;
 import android.telephony.SubscriptionInfo;
 import android.telephony.SubscriptionManager;
 import android.telephony.TelephonyManager;
 import android.text.TextUtils;
-import android.util.Log;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.RequiresApi;
 import androidx.annotation.RequiresPermission;
 
 import org.telegram.PhoneFormat.PhoneFormat;
-import org.telegram.messenger.web.R;
-import org.telegram.tgnet.AbstractSerializedData;
 import org.telegram.tgnet.ConnectionsManager;
+import org.telegram.tgnet.InputSerializedData;
+import org.telegram.tgnet.OutputSerializedData;
 import org.telegram.tgnet.SerializedData;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TL_smsjobs;
 import org.telegram.tgnet.TLRPC;
-import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.LaunchActivity;
 import org.telegram.ui.SMSSubscribeSheet;
@@ -47,7 +36,6 @@ import java.util.Collections;
 import java.util.HashMap;
 import java.util.HashSet;
 import java.util.List;
-import java.util.Map;
 
 public class SMSJobController implements NotificationCenter.NotificationCenterDelegate {
 
@@ -228,7 +216,7 @@ public class SMSJobController implements NotificationCenter.NotificationCenterDe
                 if (err != null) {
                     BulletinFactory.showError(err);
                 } else if (res instanceof TLRPC.TL_boolFalse) {
-                    BulletinFactory.global().createErrorBulletin(LocaleController.getString(R.string.UnknownError)).show();
+                    BulletinFactory.global().createErrorBulletin(LocaleController.getString(org.telegram.messenger.R.string.UnknownError)).show();
                 } else {
                     setState(SMSJobController.STATE_JOINED);
                     loadStatus(true);
@@ -441,7 +429,7 @@ public class SMSJobController implements NotificationCenter.NotificationCenterDe
         }
 
         @Override
-        public void serializeToStream(AbstractSerializedData stream) {
+        public void serializeToStream(OutputSerializedData stream) {
             stream.writeInt32(0x8384213);
             stream.writeInt32(id);
             stream.writeInt32(currentAccount);
@@ -459,7 +447,7 @@ public class SMSJobController implements NotificationCenter.NotificationCenterDe
         }
 
         @Override
-        public void readParams(AbstractSerializedData stream, boolean exception) {
+        public void readParams(InputSerializedData stream, boolean exception) {
             id = stream.readInt32(exception);
             currentAccount = stream.readInt32(exception);
             jobId = stream.readString(exception);
@@ -818,7 +806,7 @@ public class SMSJobController implements NotificationCenter.NotificationCenterDe
             if (err != null) {
                 BulletinFactory.showError(err);
             } else if (res instanceof TLRPC.TL_boolFalse) {
-                BulletinFactory.global().createErrorBulletin(LocaleController.getString(R.string.UnknownError)).show();
+                BulletinFactory.global().createErrorBulletin(LocaleController.getString(org.telegram.messenger.R.string.UnknownError)).show();
             } else {
                 SMSJobController.getInstance(currentAccount).loadStatus(true);
                 SMSJobController.getInstance(currentAccount).checkIsEligible(true, null);

@@ -1,5 +1,8 @@
 package org.telegram.ui.Components.spoilers;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.dpf2;
+
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
 import android.animation.TimeInterpolator;
@@ -18,17 +21,13 @@ import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Region;
 import android.graphics.drawable.Drawable;
-import android.graphics.text.LineBreaker;
 import android.os.Build;
 import android.text.Layout;
-import android.text.Spannable;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
 import android.text.StaticLayout;
-import android.text.TextUtils;
 import android.text.style.ForegroundColorSpan;
 import android.text.style.ReplacementSpan;
-import android.util.Log;
 import android.view.View;
 import android.widget.TextView;
 
@@ -43,8 +42,10 @@ import org.telegram.messenger.Emoji;
 import org.telegram.messenger.LiteMode;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.utils.Choreographer60FpsContent;
 import org.telegram.ui.ActionBar.Theme;
-import org.telegram.ui.Components.BlurredFrameLayout;
+import org.telegram.ui.CachedStaticLayout;
+import org.telegram.ui.Cells.BaseCell;
 import org.telegram.ui.Components.Easings;
 import org.telegram.ui.Components.QuoteSpan;
 import org.telegram.ui.Components.SizeNotifierFrameLayout;
@@ -68,19 +69,20 @@ public class SpoilerEffect extends Drawable {
     public final static float[] ALPHAS = {
             0.3f, 0.6f, 1.0f
     };
-    private Paint[] particlePaints = new Paint[ALPHAS.length];
+    private final Paint[] particlePaints = new Paint[ALPHAS.length];
+    private final float[] halfStrokeWidths = new float[ALPHAS.length];
 
-    private Stack<Particle> particlesPool = new Stack<>();
+    private final Stack<Particle> particlesPool = new Stack<>();
     private int maxParticles;
-    float[][] particlePoints = new float[ALPHAS.length][MAX_PARTICLES_PER_ENTITY * 5];
-    private float[] particleRands = new float[RAND_REPEAT];
-    private int[] renderCount = new int[ALPHAS.length];
+    private static final float[][] particlePoints = new float[ALPHAS.length][MAX_PARTICLES_PER_ENTITY * 5];
+    private final float[] particleRands = new float[RAND_REPEAT];
+    private final int[] renderCount = new int[ALPHAS.length];
 
-    private static Path tempPath = new Path();
+    private static final Path tempPath = new Path();
 
     private RectF visibleRect;
 
-    private ArrayList<Particle> particles = new ArrayList<>();
+    private final ArrayList<Particle> particles = new ArrayList<>();
     private View mParent;
 
     private long lastDrawTime;
@@ -93,7 +95,6 @@ public class SpoilerEffect extends Drawable {
     private Runnable onRippleEndCallback;
     private ValueAnimator rippleAnimator;
 
-    private List<RectF> spaces = new ArrayList<>();
     private int mAlpha = 0xFF;
 
     private TimeInterpolator rippleInterpolator = input -> input;
@@ -101,10 +102,9 @@ public class SpoilerEffect extends Drawable {
     private boolean invalidateParent;
     private boolean suppressUpdates;
     private boolean isLowDevice;
-    private boolean enableAlpha;
 
+    private ColorFilter colorFilter;
     private int lastColor;
-    public boolean drawPoints;
     private static Paint xRefPaint;
     private int bitmapSize;
 
@@ -144,10 +144,10 @@ public class SpoilerEffect extends Drawable {
                 particlePaints[i].setStyle(Paint.Style.STROKE);
                 particlePaints[i].setStrokeCap(Paint.Cap.ROUND);
             }
+            halfStrokeWidths[i] = particlePaints[i].getStrokeWidth() * 0.5f;
         }
 
         isLowDevice = SharedConfig.getDevicePerformanceClass() == SharedConfig.PERFORMANCE_CLASS_LOW;
-        enableAlpha = true;
         setColor(Color.TRANSPARENT);
     }
 
@@ -259,6 +259,10 @@ public class SpoilerEffect extends Drawable {
         path.addCircle(rippleX, rippleY, rippleMaxRadius * MathUtils.clamp(rippleProgress, 0, 1), Path.Direction.CW);
     }
 
+    public boolean hasRipplePath() {
+        return rippleMaxRadius > 0 && rippleProgress > 0;
+    }
+
     /**
      * @return Current ripple progress
      */
@@ -303,130 +307,202 @@ public class SpoilerEffect extends Drawable {
 
     @Override
     public void draw(@NonNull Canvas canvas) {
-        if (drawPoints) {
-            long curTime = System.currentTimeMillis();
-            int dt = (int) Math.min(curTime - lastDrawTime, renderDelayMs);
-            boolean hasAnimator = false;
+        final Rect bounds = getBounds();
+        if (bounds.isEmpty()) {
+            return;
+        }
 
-            lastDrawTime = curTime;
+        final Paint shaderPaint = SpoilerEffectBitmapFactory.getInstance().getPaint();
+        shaderPaint.setColorFilter(colorFilter);
 
-            int left = getBounds().left, top = getBounds().top, right = getBounds().right, bottom = getBounds().bottom;
-            for (int i = 0; i < ALPHAS.length; i++) {
-                renderCount[i] = 0;
-            }
-            for (int i = 0; i < particles.size(); i++) {
-                Particle particle = particles.get(i);
+        canvas.drawRect(bounds, shaderPaint);
+        if (LiteMode.isEnabled(LiteMode.FLAG_CHAT_SPOILER)) {
+            Choreographer60FpsContent.getInstance().postInvalidateDrawable(this);
+            SpoilerEffectBitmapFactory.getInstance().checkUpdate(bounds);
+        }
+    }
 
-                particle.currentTime = Math.min(particle.currentTime + dt, particle.lifeTime);
-                if (particle.currentTime >= particle.lifeTime || isOutOfBounds(left, top, right, bottom, particle.x, particle.y)) {
-                    if (particlesPool.size() < maxParticles) {
-                        particlesPool.push(particle);
-                    }
-                    particles.remove(i);
-                    i--;
-                    continue;
+    private final RectF boundsFWithInset = new RectF();
+
+    @Override
+    protected void onBoundsChange(@NonNull Rect bounds) {
+        super.onBoundsChange(bounds);
+        boundsFWithInset.set(bounds);
+        boundsFWithInset.inset(0, AndroidUtilities.dp(VERTICAL_PADDING_DP));
+    }
+
+    public void addPoints(SpoilerEffectBitmapFactory.PointsBuffer[] buffers, Rect clipRegion) {
+        if (buffers == null || buffers.length != ALPHAS.length) {
+            return;
+        }
+
+        final long curTime = System.currentTimeMillis();
+        final int dt = (int) Math.min(curTime - lastDrawTime, renderDelayMs);
+        lastDrawTime = curTime;
+
+        final ArrayList<Particle> particles = this.particles;
+        final Stack<Particle> particlesPool = this.particlesPool;
+        final int maxParticles = this.maxParticles;
+        final int alphaCount = ALPHAS.length;
+        final int lastAlphaIndex = alphaCount - 1;
+
+        final Rect bounds = getBounds();
+        final float spawnLeft = bounds.left;
+        final float spawnTop = bounds.top;
+        final float spawnWidth = bounds.width();
+        final float spawnHeight = bounds.height();
+
+        final float insetLeft = boundsFWithInset.left;
+        final float insetTop = boundsFWithInset.top;
+        final float insetRight = boundsFWithInset.right;
+        final float insetBottom = boundsFWithInset.bottom;
+
+        final float damageM = dpf2(1);
+        final float visibleLeft = clipRegion.left - damageM;
+        final float visibleTop = clipRegion.top - damageM;
+        final float visibleRight = clipRegion.right + damageM;
+        final float visibleBottom = clipRegion.bottom + damageM;
+
+        final float hdtMul = dt / 500f;
+
+        for (int i = 0, size = particles.size(); i < size; i++) {
+            final Particle particle = particles.get(i);
+
+            final float newCurrentTime = Math.min(particle.currentTime + dt, particle.lifeTime);
+            particle.currentTime = newCurrentTime;
+
+            final float x = particle.x;
+            final float y = particle.y;
+            final boolean outOfInsetBounds = x < insetLeft || x > insetRight || y < insetTop || y > insetBottom;
+
+            if (newCurrentTime >= particle.lifeTime || outOfInsetBounds) {
+                if (particlesPool.size() < maxParticles) {
+                    particlesPool.push(particle);
                 }
 
-                float hdt = particle.velocity * dt / 500f;
-                particle.x += particle.vecX * hdt;
-                particle.y += particle.vecY * hdt;
-            }
-
-            if (particles.size() < maxParticles) {
-                int np = maxParticles - particles.size();
-                Arrays.fill(particleRands, -1);
-                for (int i = 0; i < np; i++) {
-                    float rf = particleRands[i % RAND_REPEAT];
-                    if (rf == -1) {
-                        particleRands[i % RAND_REPEAT] = rf = Utilities.fastRandom.nextFloat();
-                    }
-
-                    Particle newParticle = !particlesPool.isEmpty() ? particlesPool.pop() : new Particle();
-                    int attempts = 0;
-                    do {
-                        generateRandomLocation(newParticle, i);
-                        attempts++;
-                    } while (isOutOfBounds(left, top, right, bottom, newParticle.x, newParticle.y) && attempts < 4);
-
-
-                    double angleRad = rf * Math.PI * 2 - Math.PI;
-                    float vx = (float) Math.cos(angleRad);
-                    float vy = (float) Math.sin(angleRad);
-
-                    newParticle.vecX = vx;
-                    newParticle.vecY = vy;
-
-                    newParticle.currentTime = 0;
-
-                    newParticle.lifeTime = 1000 + Math.abs(Utilities.fastRandom.nextInt(2000)); // [1000;3000]
-                    newParticle.velocity = 4 + rf * 6;
-                    newParticle.alpha = Utilities.fastRandom.nextInt(ALPHAS.length);
-                    particles.add(newParticle);
-
+                final int last = size - 1;
+                if (i != last) {
+                    particles.set(i, particles.get(last));
                 }
+                particles.remove(last);
+                size--;
+                i--;
+                continue;
             }
 
-            for (int a = enableAlpha ? 0 : ALPHAS.length - 1; a < ALPHAS.length; a++) {
-                int renderCount = 0;
-                float paintW = particlePaints[a].getStrokeWidth() / 2f;
-                for (int i = 0; i < particles.size(); i++) {
-                    Particle p = particles.get(i);
+            final float hdt = particle.velocity * hdtMul;
+            particle.x = x + particle.vecX * hdt;
+            particle.y = y + particle.vecY * hdt;
+        }
 
-                    if (visibleRect != null && !visibleRect.contains(p.x, p.y) || p.alpha != a && enableAlpha) {
-                        continue;
-                    }
+        int size = particles.size();
+        if (size < maxParticles) {
+            final int np = maxParticles - size;
+            final int randInitCount = Math.min(np, RAND_REPEAT);
+            Arrays.fill(particleRands, 0, randInitCount, -1f);
 
-                    if (renderCount >= particlePoints[a].length - 2) {
-                        continue;
-                    }
-                    particlePoints[a][renderCount] = p.x;
-                    particlePoints[a][renderCount + 1] = p.y;
-                    renderCount += 2;
-                    if (p.x < paintW) {
-                        if (renderCount >= particlePoints[a].length - 2) {
-                            continue;
-                        }
-                        particlePoints[a][renderCount] = p.x + bitmapSize;
-                        particlePoints[a][renderCount + 1] = p.y;
-                        renderCount += 2;
-                    }
-                    if (p.x > bitmapSize - paintW) {
-                        if (renderCount >= particlePoints[a].length - 2) {
-                            continue;
-                        }
-                        particlePoints[a][renderCount] = p.x - bitmapSize;
-                        particlePoints[a][renderCount + 1] = p.y;
-                        renderCount += 2;
-                    }
-                    if (p.y < paintW) {
-                        if (renderCount >= particlePoints[a].length - 2) {
-                            continue;
-                        }
-                        particlePoints[a][renderCount] = p.x;
-                        particlePoints[a][renderCount + 1] = p.y + bitmapSize;
-                        renderCount += 2;
-                    }
-                    if (p.y > bitmapSize - paintW) {
-                        if (renderCount >= particlePoints[a].length - 2) {
-                            continue;
-                        }
-                        particlePoints[a][renderCount] = p.x;
-                        particlePoints[a][renderCount + 1] = p.y - bitmapSize;
-                        renderCount += 2;
-                    }
-
-
+            int ri = 0;
+            for (int i = 0; i < np; i++) {
+                float rf = particleRands[ri];
+                if (rf == -1f) {
+                    rf = Utilities.fastRandom.nextFloat();
+                    particleRands[ri] = rf;
                 }
-                canvas.drawPoints(particlePoints[a], 0, renderCount, particlePaints[a]);
+                ri++;
+                if (ri == RAND_REPEAT) {
+                    ri = 0;
+                }
+
+                final Particle newParticle = !particlesPool.isEmpty() ? particlesPool.pop() : new Particle();
+
+                int attempts = 0;
+                do {
+                    newParticle.x = spawnLeft + Utilities.fastRandom.nextFloat() * spawnWidth;
+                    newParticle.y = spawnTop + Utilities.fastRandom.nextFloat() * spawnHeight;
+                    attempts++;
+                } while ((newParticle.x < insetLeft || newParticle.x > insetRight || newParticle.y < insetTop || newParticle.y > insetBottom) && attempts < 4);
+
+                final double angleRad = rf * Math.PI * 2.0 - Math.PI;
+                newParticle.vecX = (float) Math.cos(angleRad);
+                newParticle.vecY = (float) Math.sin(angleRad);
+
+                newParticle.currentTime = 0f;
+                newParticle.lifeTime = 1000 + Utilities.fastRandom.nextInt(2000);
+                newParticle.velocity = 4f + rf * 6f;
+                newParticle.alpha = Utilities.fastRandom.nextInt(alphaCount);
+
+                particles.add(newParticle);
             }
-        } else {
-            Paint shaderPaint = SpoilerEffectBitmapFactory.getInstance().getPaint();
-            shaderPaint.setColorFilter(new PorterDuffColorFilter(lastColor, PorterDuff.Mode.SRC_IN));
-            canvas.drawRect(getBounds().left, getBounds().top, getBounds().right, getBounds().bottom, SpoilerEffectBitmapFactory.getInstance().getPaint());
-            if (LiteMode.isEnabled(LiteMode.FLAG_CHAT_SPOILER)) {
-                invalidateSelf();
-                SpoilerEffectBitmapFactory.getInstance().checkUpdate();
+
+            size = particles.size();
+        }
+
+        for (int i = 0; i < alphaCount; i++) {
+            renderCount[i] = 0;
+        }
+
+        final int startAlpha = 0;
+        final int bitmapSize = this.bitmapSize;
+
+        for (int i = 0; i < size; i++) {
+            final Particle p = particles.get(i);
+            final float x = p.x;
+            final float y = p.y;
+
+            if (x < visibleLeft || x > visibleRight || y < visibleTop || y > visibleBottom) {
+                continue;
             }
+
+            final int a = p.alpha;
+            final float[] points = particlePoints[a];
+            int count = renderCount[a];
+
+            if (count + 1 >= points.length) {
+                continue;
+            }
+
+            points[count] = x;
+            points[count + 1] = y;
+            count += 2;
+
+            final float paintW = halfStrokeWidths[a];
+
+            if (x < paintW && count + 1 < points.length) {
+                points[count] = x + bitmapSize;
+                points[count + 1] = y;
+                count += 2;
+            }
+            if (x > bitmapSize - paintW && count + 1 < points.length) {
+                points[count] = x - bitmapSize;
+                points[count + 1] = y;
+                count += 2;
+            }
+            if (y < paintW && count + 1 < points.length) {
+                points[count] = x;
+                points[count + 1] = y + bitmapSize;
+                count += 2;
+            }
+            if (y > bitmapSize - paintW && count + 1 < points.length) {
+                points[count] = x;
+                points[count + 1] = y - bitmapSize;
+                count += 2;
+            }
+
+            renderCount[a] = count;
+        }
+
+        for (int a = startAlpha; a < alphaCount; a++) {
+            buffers[a].addPoints(particlePoints[a], 0, renderCount[a]);
+        }
+    }
+
+    public void drawPoints(Canvas canvas, SpoilerEffectBitmapFactory.PointsBuffer[] buffers) {
+        if (buffers == null || buffers.length != ALPHAS.length) {
+            return;
+        }
+
+        for (int a = 0; a < ALPHAS.length; a++) {
+            buffers[a].draw(canvas, particlePaints[a]);
         }
     }
 
@@ -445,24 +521,6 @@ public class SpoilerEffect extends Drawable {
         }
     }
 
-    private boolean isOutOfBounds(int left, int top, int right, int bottom, float x, float y) {
-        if (x < left || x > right || y < top + AndroidUtilities.dp(VERTICAL_PADDING_DP) ||
-                y > bottom - AndroidUtilities.dp(VERTICAL_PADDING_DP))
-            return true;
-
-        for (int i = 0; i < spaces.size(); i++) {
-            if (spaces.get(i).contains(x, y)) {
-                return true;
-            }
-        }
-        return false;
-    }
-
-    private void generateRandomLocation(Particle newParticle, int i) {
-        newParticle.x = getBounds().left + Utilities.fastRandom.nextFloat() * getBounds().width();
-        newParticle.y = getBounds().top + Utilities.fastRandom.nextFloat() * getBounds().height();
-    }
-
     @Override
     public void invalidateSelf() {
         super.invalidateSelf();
@@ -471,7 +529,9 @@ public class SpoilerEffect extends Drawable {
             View v = mParent;
             if (v.getParent() != null && invalidateParent) {
                 ((View) v.getParent()).invalidate();
-            } else {
+            } else if (v instanceof BaseCell) {
+                ((BaseCell) v).invalidateLite();
+            } else if (v != null) {
                 v.invalidate();
             }
         }
@@ -518,6 +578,7 @@ public class SpoilerEffect extends Drawable {
             for (int i = 0; i < ALPHAS.length; i++) {
                 particlePaints[i].setColor(ColorUtils.setAlphaComponent(color, (int) (mAlpha * ALPHAS[i])));
             }
+            colorFilter = new PorterDuffColorFilter(color, PorterDuff.Mode.SRC_IN);
             lastColor = color;
         }
     }
@@ -595,6 +656,8 @@ public class SpoilerEffect extends Drawable {
         addSpoilers(v, textLayout, -1, -1, spannable, spoilersPool, spoilers, null);
     }
 
+    public static final int MAX_SPOILERS_COUNT = 100;
+
     /**
      * Parses spoilers from spannable
      *
@@ -613,7 +676,7 @@ public class SpoilerEffect extends Drawable {
             return;
         }
         TextStyleSpan[] spans = spannable.getSpans(0, textLayout.getText().length(), TextStyleSpan.class);
-        for (int i = 0; i < spans.length; ++i) {
+        for (int i = 0; i < Math.min(MAX_SPOILERS_COUNT, spans.length); ++i) {
             if (spans[i].isSpoiler()) {
                 final int start = spannable.getSpanStart(spans[i]);
                 final int end = spannable.getSpanEnd(spans[i]);
@@ -673,6 +736,10 @@ public class SpoilerEffect extends Drawable {
      * Clips out spoilers from canvas
      */
     public static void clipOutCanvas(Canvas canvas, List<SpoilerEffect> spoilers) {
+        if (spoilers.isEmpty()) {
+            // nothing to clip
+            return;
+        }
         tempPath.rewind();
         for (int i = 0; i < spoilers.size(); i++) {
             SpoilerEffect eff = spoilers.get(i);
@@ -717,11 +784,13 @@ public class SpoilerEffect extends Drawable {
 
     /**
      * Optimized version of text layout double-render
-     *  @param v                        View to use as a parent view
+     *
+     * @param v                        View to use as a parent view
      * @param invalidateSpoilersParent Set to invalidate parent or not
      * @param spoilersColor            Spoilers' color
      * @param verticalOffset           Additional vertical offset
      * @param patchedLayoutRef         Patched layout reference
+     * @param patchedLayoutType
      * @param textLayout               Layout to render
      * @param spoilers                 Spoilers list to render
      * @param canvas                   Canvas to render
@@ -729,8 +798,8 @@ public class SpoilerEffect extends Drawable {
      */
     @SuppressLint("WrongConstant")
     @MainThread
-    public static void renderWithRipple(View v, boolean invalidateSpoilersParent, int spoilersColor, int verticalOffset, AtomicReference<Layout> patchedLayoutRef, Layout textLayout, List<SpoilerEffect> spoilers, Canvas canvas, boolean useParentWidth) {
-        if (spoilers.isEmpty()) {
+    public static void renderWithRipple(View v, boolean invalidateSpoilersParent, int spoilersColor, int verticalOffset, AtomicReference<Layout> patchedLayoutRef, int patchedLayoutType, Layout textLayout, List<SpoilerEffect> spoilers, Canvas canvas, boolean useParentWidth) {
+        if (spoilers == null || spoilers.isEmpty()) {
             layoutDrawMaybe(textLayout, canvas);
             return;
         }
@@ -740,7 +809,9 @@ public class SpoilerEffect extends Drawable {
             SpannableStringBuilder sb = new SpannableStringBuilder(textLayout.getText());
             if (textLayout.getText() instanceof Spanned) {
                 Spanned sp = (Spanned) textLayout.getText();
-                for (TextStyleSpan ss : sp.getSpans(0, sp.length(), TextStyleSpan.class)) {
+                TextStyleSpan[] spans = sp.getSpans(0, sp.length(), TextStyleSpan.class);
+                for (int i = 0; i < Math.min(MAX_SPOILERS_COUNT, spans.length); ++i) {
+                    TextStyleSpan ss = spans[i];
                     if (ss.isSpoiler()) {
                         int start = sp.getSpanStart(ss), end = sp.getSpanEnd(ss);
                         for (Emoji.EmojiSpan e : sp.getSpans(start, end, Emoji.EmojiSpan.class)) {
@@ -764,7 +835,9 @@ public class SpoilerEffect extends Drawable {
             }
 
             Layout layout;
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+            if (patchedLayoutType == 1) {
+                layout = new StaticLayout(sb, textLayout.getPaint(), textLayout.getWidth(), Layout.Alignment.ALIGN_CENTER, 1.0f, dp(1.66f), false);
+            } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
                 layout = StaticLayout.Builder.obtain(sb, 0, sb.length(), textLayout.getPaint(), textLayout.getWidth())
                         .setBreakStrategy(StaticLayout.BREAK_STRATEGY_HIGH_QUALITY)
                         .setHyphenationFrequency(StaticLayout.HYPHENATION_FREQUENCY_NONE)
@@ -821,13 +894,132 @@ public class SpoilerEffect extends Drawable {
                 eff.setInvalidateParent(invalidateSpoilersParent);
                 if (eff.getParentView() != v) eff.setParentView(v);
                 if (eff.shouldInvalidateColor()) {
-                    eff.setColor(ColorUtils.blendARGB(spoilersColor, Theme.chat_msgTextPaint.getColor(), Math.max(0, eff.getRippleProgress())));
+                    eff.setColor(ColorUtils.blendARGB(spoilersColor, patchedLayoutType == 1 ? textLayout.getPaint().getColor() : Theme.chat_msgTextPaint.getColor(), Math.max(0, eff.getRippleProgress())));
                 } else {
                     eff.setColor(spoilersColor);
                 }
                 eff.draw(canvas);
             }
 
+            if (useAlphaLayer) {
+                tempPath.rewind();
+                spoilers.get(0).getRipplePath(tempPath);
+                if (xRefPaint == null) {
+                    xRefPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+                    xRefPaint.setColor(0xff000000);
+                    xRefPaint.setXfermode(new PorterDuffXfermode(PorterDuff.Mode.CLEAR));
+                }
+                canvas.drawPath(tempPath, xRefPaint);
+            }
+            canvas.restore();
+        }
+    }
+
+
+    /**
+     * Optimized version of text layout double-render
+     *  @param v                        View to use as a parent view
+     * @param invalidateSpoilersParent Set to invalidate parent or not
+     * @param spoilersColor            Spoilers' color
+     * @param verticalOffset           Additional vertical offset
+     * @param patchedLayoutRef         Patched layout reference
+     * @param textLayout               Layout to render
+     * @param spoilers                 Spoilers list to render
+     * @param canvas                   Canvas to render
+     * @param useParentWidth
+     */
+    @SuppressLint("WrongConstant")
+    @MainThread
+    public static void renderWithRipple(View v, boolean invalidateSpoilersParent, int spoilersColor, int verticalOffset, AtomicReference<CachedStaticLayout> patchedLayoutRef, CachedStaticLayout textLayout, List<SpoilerEffect> spoilers, Canvas canvas, boolean useParentWidth) {
+        if (spoilers.isEmpty()) {
+            textLayout.draw(canvas);
+            return;
+        }
+        CachedStaticLayout pl = patchedLayoutRef.get();
+        if (pl == null || !textLayout.getText().toString().equals(pl.getText().toString()) || textLayout.layout.getWidth() != pl.layout.getWidth() || textLayout.layout.getHeight() != pl.layout.getHeight()) {
+            SpannableStringBuilder sb = new SpannableStringBuilder(textLayout.getText());
+            if (textLayout.getText() instanceof Spanned) {
+                Spanned sp = (Spanned) textLayout.getText();
+                for (TextStyleSpan ss : sp.getSpans(0, sp.length(), TextStyleSpan.class)) {
+                    if (ss.isSpoiler()) {
+                        int start = sp.getSpanStart(ss), end = sp.getSpanEnd(ss);
+                        for (Emoji.EmojiSpan e : sp.getSpans(start, end, Emoji.EmojiSpan.class)) {
+                            sb.setSpan(new ReplacementSpan() {
+                                @Override
+                                public int getSize(@NonNull Paint paint, CharSequence text, int start, int end, @Nullable Paint.FontMetricsInt fm) {
+                                    return e.getSize(paint, text, start, end, fm);
+                                }
+                                @Override
+                                public void draw(@NonNull Canvas canvas, CharSequence text, int start, int end, float x, int top, int y, int bottom, @NonNull Paint paint) {
+                                }
+                            }, sp.getSpanStart(e), sp.getSpanEnd(e), sp.getSpanFlags(ss));
+                            sb.removeSpan(e);
+                        }
+                        sb.setSpan(new ForegroundColorSpan(Color.TRANSPARENT), start, end, sp.getSpanFlags(ss));
+                        sb.removeSpan(ss);
+                    }
+                }
+            }
+            StaticLayout layout;
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.N) {
+                layout = StaticLayout.Builder.obtain(sb, 0, sb.length(), textLayout.layout.getPaint(), textLayout.layout.getWidth())
+                        .setBreakStrategy(StaticLayout.BREAK_STRATEGY_HIGH_QUALITY)
+                        .setHyphenationFrequency(StaticLayout.HYPHENATION_FREQUENCY_NONE)
+                        .setAlignment(textLayout.layout.getAlignment())
+                        .setLineSpacing(textLayout.layout.getSpacingAdd(), textLayout.layout.getSpacingMultiplier())
+                        .build();
+            } else {
+                layout = new StaticLayout(sb, textLayout.layout.getPaint(), textLayout.layout.getWidth(), textLayout.layout.getAlignment(), textLayout.layout.getSpacingMultiplier(), textLayout.layout.getSpacingAdd(), false);
+            }
+            patchedLayoutRef.set(pl = new CachedStaticLayout(layout));
+        }
+        if (!spoilers.isEmpty()) {
+            canvas.save();
+            canvas.translate(0, verticalOffset);
+            pl.draw(canvas);
+            canvas.restore();
+        } else {
+            textLayout.draw(canvas);
+        }
+        if (!spoilers.isEmpty()) {
+            tempPath.rewind();
+            for (SpoilerEffect eff : spoilers) {
+                Rect b = eff.getBounds();
+                tempPath.addRect(b.left, b.top, b.right, b.bottom, Path.Direction.CW);
+            }
+            if (!spoilers.isEmpty() && spoilers.get(0).rippleProgress != -1) {
+                canvas.save();
+                canvas.clipPath(tempPath);
+                tempPath.rewind();
+                if (!spoilers.isEmpty()) {
+                    spoilers.get(0).getRipplePath(tempPath);
+                }
+                canvas.clipPath(tempPath);
+                canvas.translate(0, -v.getPaddingTop());
+                textLayout.draw(canvas);
+                canvas.restore();
+            }
+            boolean useAlphaLayer = spoilers.get(0).rippleProgress != -1;
+            if (useAlphaLayer) {
+                int w = v.getMeasuredWidth();
+                if (useParentWidth && v.getParent() instanceof View) {
+                    w = ((View) v.getParent()).getMeasuredWidth();
+                }
+                canvas.saveLayer(0, 0, w, v.getMeasuredHeight(), null, canvas.ALL_SAVE_FLAG);
+            } else {
+                canvas.save();
+            }
+            canvas.translate(0, -v.getPaddingTop());
+            for (SpoilerEffect eff : spoilers) {
+                eff.setInvalidateParent(invalidateSpoilersParent);
+                if (eff.getParentView() != v) eff.setParentView(v);
+                if (eff.shouldInvalidateColor()) {
+                    eff.setColor(ColorUtils.blendARGB(spoilersColor, Theme.chat_msgTextPaint.getColor(), Math.max(0, eff.getRippleProgress())));
+                } else {
+                    eff.setColor(spoilersColor);
+                }
+                eff.draw(canvas);
+            }
             if (useAlphaLayer) {
                 tempPath.rewind();
                 spoilers.get(0).getRipplePath(tempPath);

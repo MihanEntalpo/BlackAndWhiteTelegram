@@ -8,6 +8,8 @@
 
 package org.telegram.ui.Components;
 
+import static org.telegram.messenger.AndroidUtilities.dp;
+
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
@@ -25,11 +27,13 @@ import android.text.TextPaint;
 import android.text.TextUtils;
 import android.util.Pair;
 import android.util.StateSet;
-import android.view.HapticFeedbackConstants;
+import android.util.TypedValue;
+import android.view.Gravity;
 import android.view.MotionEvent;
 import android.view.View;
 import android.view.ViewConfiguration;
 import android.widget.FrameLayout;
+import android.widget.TextView;
 
 import androidx.core.graphics.ColorUtils;
 
@@ -37,13 +41,35 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.Emoji;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
+import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
+import org.telegram.ui.Adapters.FiltersView;
+import org.telegram.ui.DialogsActivity;
 
 import java.util.ArrayList;
 import java.util.Collections;
 
-public class SeekBarView extends FrameLayout {
+public class SeekBarView extends FrameLayout implements Theme.Colorable {
+
+    private int themedOuterColor;
+
+    @Override
+    public void updateColors() {
+        try {
+            if (outerPaint1 != null && outerPaint1.getColor() == themedOuterColor) {
+                final int color = getThemedColor(Theme.key_player_progress);
+                if (color != themedOuterColor) {
+                    themedOuterColor = color;
+                    setOuterColor(color);
+                    invalidate();
+                }
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
 
     private final SeekBarAccessibilityDelegate seekBarAccessibilityDelegate;
 
@@ -52,9 +78,10 @@ public class SeekBarView extends FrameLayout {
     private int thumbSize;
     private int selectorWidth;
     private int thumbX;
-    private AnimatedFloat animatedThumbX = new AnimatedFloat(this, 0, 80, CubicBezierInterpolator.EASE_OUT);
+    private AnimatedFloat animatedThumbX = new AnimatedFloat(this, 0, 60, CubicBezierInterpolator.EASE_OUT);
     private int thumbDX;
     private float progressToSet = -100;
+    private float minProgress = -1;
     private boolean pressed, pressedDelayed;
     public SeekBarViewDelegate delegate;
     private boolean reportChanges;
@@ -70,6 +97,7 @@ public class SeekBarView extends FrameLayout {
 
     private boolean twoSided;
     private final Theme.ResourcesProvider resourcesProvider;
+    private final AudioPlayerAlert.ClippingTextViewSwitcher textViewSwitcher;
 
     public interface SeekBarViewDelegate {
         void onSeekBarDrag(boolean stop, float progress);
@@ -79,6 +107,10 @@ public class SeekBarView extends FrameLayout {
         }
         default int getStepsCount() {
             return 0;
+        }
+
+        default boolean needVisuallyDivideSteps() {
+            return false;
         }
     }
 
@@ -97,7 +129,7 @@ public class SeekBarView extends FrameLayout {
         innerPaint1 = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         outerPaint1 = new Paint(Paint.ANTI_ALIAS_FLAG);
-        outerPaint1.setColor(getThemedColor(Theme.key_player_progress));
+        outerPaint1.setColor(themedOuterColor = getThemedColor(Theme.key_player_progress));
 
         selectorWidth = AndroidUtilities.dp(32);
         thumbSize = AndroidUtilities.dp(24);
@@ -108,6 +140,21 @@ public class SeekBarView extends FrameLayout {
             hoverDrawable.setCallback(this);
             hoverDrawable.setVisible(true, false);
         }
+
+        textViewSwitcher = new AudioPlayerAlert.ClippingTextViewSwitcher(context) {
+            @Override
+            protected TextView createTextView() {
+                final TextView textView = new MarqueeTextView(context);
+                ThemeBind.textColor(textView, Theme.key_player_time, SeekBarView.this.resourcesProvider);
+                textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 12);
+                textView.setEllipsize(TextUtils.TruncateAt.END);
+                textView.setSingleLine(true);
+                textView.setPadding(dp(0), 0, dp(0), dp(0));
+                return textView;
+            }
+        };
+        textViewSwitcher.setIsCenter();
+        addView(textViewSwitcher, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT));
 
         setImportantForAccessibility(IMPORTANT_FOR_ACCESSIBILITY_YES);
         setAccessibilityDelegate(seekBarAccessibilityDelegate = new FloatSeekBarAccessibilityDelegate(inPercents) {
@@ -186,6 +233,14 @@ public class SeekBarView extends FrameLayout {
         reportChanges = value;
     }
 
+    public void setMinProgress(float progress) {
+        minProgress = progress;
+        if (getProgress() < minProgress) {
+            setProgress(minProgress, false);
+        }
+        invalidate();
+    }
+
     public void setDelegate(SeekBarViewDelegate seekBarViewDelegate) {
         delegate = seekBarViewDelegate;
     }
@@ -205,8 +260,8 @@ public class SeekBarView extends FrameLayout {
                     int additionWidth = (getMeasuredHeight() - thumbSize) / 2;
                     if (!(thumbX - additionWidth <= ev.getX() && ev.getX() <= thumbX + thumbSize + additionWidth)) {
                         thumbX = (int) ev.getX() - thumbSize / 2;
-                        if (thumbX < 0) {
-                            thumbX = 0;
+                        if (thumbX < minThumbX()) {
+                            thumbX = minThumbX();
                         } else if (thumbX > getMeasuredWidth() - selectorWidth) {
                             thumbX = getMeasuredWidth() - selectorWidth;
                         }
@@ -250,8 +305,8 @@ public class SeekBarView extends FrameLayout {
                     if (ev.getY() >= 0 && ev.getY() <= getMeasuredHeight()) {
                         if (!(thumbX - additionWidth <= ev.getX() && ev.getX() <= thumbX + thumbSize + additionWidth)) {
                             thumbX = (int) ev.getX() - thumbSize / 2;
-                            if (thumbX < 0) {
-                                thumbX = 0;
+                            if (thumbX < minThumbX()) {
+                                thumbX = minThumbX();
                             } else if (thumbX > getMeasuredWidth() - selectorWidth) {
                                 thumbX = getMeasuredWidth() - selectorWidth;
                             }
@@ -270,8 +325,8 @@ public class SeekBarView extends FrameLayout {
             } else {
                 if (pressed) {
                     thumbX = (int) (ev.getX() - thumbDX);
-                    if (thumbX < 0) {
-                        thumbX = 0;
+                    if (thumbX < minThumbX()) {
+                        thumbX = minThumbX();
                     } else if (thumbX > getMeasuredWidth() - selectorWidth) {
                         thumbX = getMeasuredWidth() - selectorWidth;
                     }
@@ -296,6 +351,10 @@ public class SeekBarView extends FrameLayout {
             }
         }
         return false;
+    }
+
+    private int minThumbX() {
+        return Math.max((int) (minProgress * (getMeasuredWidth() - selectorWidth)), 0);
     }
 
     public void setLineWidth(int dp) {
@@ -351,8 +410,8 @@ public class SeekBarView extends FrameLayout {
                 transitionProgress = 0f;
             }
             thumbX = newThumbX;
-            if (thumbX < 0) {
-                thumbX = 0;
+            if (thumbX < minThumbX()) {
+                thumbX = minThumbX();
             } else if (thumbX > getMeasuredWidth() - selectorWidth) {
                 thumbX = getMeasuredWidth() - selectorWidth;
             }
@@ -368,10 +427,21 @@ public class SeekBarView extends FrameLayout {
     @Override
     protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
         super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+        lastTimestampLabelWidth = getTimestampLabelWidth();
+        textViewSwitcher.measure(MeasureSpec.makeMeasureSpec(lastTimestampLabelWidth, MeasureSpec.EXACTLY), 0);
         if (progressToSet != -100 && getMeasuredWidth() > 0) {
             setProgress(progressToSet);
             progressToSet = -100;
         }
+    }
+
+    @Override
+    protected void onLayout(boolean changed, int left, int top, int right, int bottom) {
+        super.onLayout(changed, left, top, right, bottom);
+        int b = getMeasuredHeight() / 2 + AndroidUtilities.dp(14) + textViewSwitcher.getMeasuredHeight() / 2;
+        int l = (selectorWidth / 2 + (lastDuration > 1000L * 60 * 10 ? AndroidUtilities.dp(42) : 0)) + AndroidUtilities.dp(25) + AndroidUtilities.dp(8) /*+ AndroidUtilities.dp(16)*/;
+
+        textViewSwitcher.layout(l, b - textViewSwitcher.getMeasuredHeight(), l + textViewSwitcher.getMeasuredWidth(), b);
     }
 
     @Override
@@ -389,6 +459,9 @@ public class SeekBarView extends FrameLayout {
         if (!twoSided && separatorsCount > 1) {
             float step = (getMeasuredWidth() - selectorWidth) / ((float) separatorsCount - 1f);
             thumbX = (int) animatedThumbX.set(Math.round((thumbX) / step) * step);
+        } else if (delegate != null && delegate.needVisuallyDivideSteps()) {
+            float step = (getMeasuredWidth() - selectorWidth) / ((float) delegate.getStepsCount() - 1f);
+            thumbX = (int) (Math.round((thumbX) / step) * step);
         }
         int y = (getMeasuredHeight() - thumbSize) / 2;
         innerPaint1.setColor(getThemedColor(Theme.key_player_progressBackground));
@@ -412,8 +485,18 @@ public class SeekBarView extends FrameLayout {
                 canvas.drawRect(thumbX + selectorWidth / 2, getMeasuredHeight() / 2 - AndroidUtilities.dp(1), getMeasuredWidth() / 2, getMeasuredHeight() / 2 + AndroidUtilities.dp(1), outerPaint1);
             }
         } else {
-            rect.set(left, top, selectorWidth / 2 + thumbX, bottom);
-            drawProgressBar(canvas, rect, outerPaint1);
+            if (minProgress >= 0) {
+                rect.set(left + minProgress * (right - left), top, left + thumbX, bottom);
+                drawProgressBar(canvas, rect, outerPaint1);
+                int wasAlpha = outerPaint1.getAlpha();
+                rect.set(left, top, left + minProgress * (right - left), bottom);
+                outerPaint1.setAlpha((int) (0.50f * wasAlpha));
+                drawProgressBar(canvas, rect, outerPaint1);
+                outerPaint1.setAlpha(wasAlpha);
+            } else {
+                rect.set(left, top, left + thumbX, bottom);
+                drawProgressBar(canvas, rect, outerPaint1);
+            }
         }
 
         if (hoverDrawable != null) {
@@ -521,11 +604,18 @@ public class SeekBarView extends FrameLayout {
             }
             text = messageObject.youtubeDescription;
         }
-        if (text == lastCaption && lastDuration == duration) {
+        final boolean textChanged = text != lastCaption;
+        if (!textChanged && lastDuration == duration) {
             return;
         }
         lastCaption = text;
         lastDuration = duration * 10;
+
+        final int timestampLabelWidth = getTimestampLabelWidth();
+        if (timestampLabelWidth != lastTimestampLabelWidth) {
+            requestLayout();
+        }
+
         if (!(text instanceof Spanned)) {
             timestamps = null;
             currentTimestamp = -1;
@@ -550,7 +640,10 @@ public class SeekBarView extends FrameLayout {
             return;
         }
         timestamps = new ArrayList<>();
-        timestampsAppearing = 0;
+        if (textChanged) {
+            timestampsAppearing = 0;
+        }
+
         if (timestampLabelPaint == null) {
             timestampLabelPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
             timestampLabelPaint.setTextSize(AndroidUtilities.dp(12));
@@ -564,7 +657,7 @@ public class SeekBarView extends FrameLayout {
                     float position = seconds * 1000L / (float) duration;
                     String label = link.label;
                     SpannableStringBuilder builder = new SpannableStringBuilder(label);
-                    Emoji.replaceEmoji(builder, timestampLabelPaint.getFontMetricsInt(), AndroidUtilities.dp(14), false);
+                    Emoji.replaceEmoji(builder, timestampLabelPaint.getFontMetricsInt(), false);
                     timestamps.add(new Pair<>(position, builder));
                 }
             }
@@ -660,6 +753,25 @@ public class SeekBarView extends FrameLayout {
         }
     }
 
+    private int timestampIndex = -1;
+    private void setTimestampIndex(int index) {
+        if (timestampIndex != index) {
+            timestampIndex = index;
+
+            if (timestampIndex >= 0 && timestampIndex < timestamps.size()) {
+                CharSequence label = timestamps.get(timestampIndex).second;
+                textViewSwitcher.setText(label);
+            }
+        }
+    }
+
+    private int lastTimestampLabelWidth;
+    private int getTimestampLabelWidth() {
+        float left = selectorWidth / 2f + (lastDuration > 1000L * 60 * 10 ? AndroidUtilities.dp(42) : 0);
+        float right = getMeasuredWidth() - selectorWidth / 2f - (lastDuration > 1000L * 60 * 10 ? AndroidUtilities.dp(42) : 0);
+        return (int) (Math.abs(left - right) - AndroidUtilities.dp(16 + 50));
+    }
+
     private void drawTimestampLabel(Canvas canvas) {
         if (timestamps == null || timestamps.isEmpty()) {
             return;
@@ -674,6 +786,7 @@ public class SeekBarView extends FrameLayout {
                 break;
             }
         }
+        setTimestampIndex(timestampIndex);
 
         if (timestampLabel == null) {
             timestampLabel = new StaticLayout[2];
@@ -747,7 +860,7 @@ public class SeekBarView extends FrameLayout {
             }
             canvas.translate(0, -timestampLabel[1].getHeight() / 2f);
             timestampLabelPaint.setAlpha((int) (255 * (1f - changeT) * timestampsAppearing));
-            timestampLabel[1].draw(canvas);
+            //timestampLabel[1].draw(canvas);
             canvas.restore();
         }
         if (timestampLabel[0] != null) {
@@ -757,7 +870,7 @@ public class SeekBarView extends FrameLayout {
             }
             canvas.translate(0, -timestampLabel[0].getHeight() / 2f);
             timestampLabelPaint.setAlpha((int) (255 * changeT * timestampsAppearing));
-            timestampLabel[0].draw(canvas);
+            //timestampLabel[0].draw(canvas);
             canvas.restore();
         }
         canvas.restore();

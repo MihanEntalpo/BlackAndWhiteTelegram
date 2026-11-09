@@ -775,7 +775,7 @@ public class FilterShaders {
         float getBlurExcludeSize();
         float getBlurExcludeBlurSize();
         float getBlurAngle();
-        Point getBlurExcludePoint();
+        PointF getBlurExcludePoint();
         boolean shouldDrawCurvesPass();
         ByteBuffer fillAndGetCurveBuffer();
     }
@@ -1380,9 +1380,9 @@ public class FilterShaders {
         String hdrProcessor = "";
         int hdrType = hdrInfo != null ? hdrInfo.getHDRType() : 0;
         if (hdrType == 1) {
-            hdrProcessor = RLottieDrawable.readRes(null, R.raw.hdr2sdr_hlg);
+            hdrProcessor = AndroidUtilities.readRes(R.raw.hdr2sdr_hlg);
         } else if (hdrType == 2) {
-            hdrProcessor = RLottieDrawable.readRes(null, R.raw.hdr2sdr_pq);
+            hdrProcessor = AndroidUtilities.readRes(R.raw.hdr2sdr_pq);
         }
         String extension = isVideo ? "#extension GL_OES_EGL_image_external : require" : "";
         String sampler2D = isVideo ? "samplerExternalOES" : "sampler2D";
@@ -1913,7 +1913,7 @@ public class FilterShaders {
             GLES20.glUniform1i(radialBlurSourceImage2Handle, 1);
             GLES20.glUniform1f(radialBlurExcludeSizeHandle, delegate.getBlurExcludeSize());
             GLES20.glUniform1f(radialBlurExcludeBlurSizeHandle, delegate.getBlurExcludeBlurSize());
-            Point blurExcludePoint = delegate.getBlurExcludePoint();
+            PointF blurExcludePoint = delegate.getBlurExcludePoint();
             GLES20.glUniform2f(radialBlurExcludePointHandle, blurExcludePoint.x, blurExcludePoint.y);
             GLES20.glUniform1f(radialBlurAspectRatioHandle, (float) renderBufferHeight / (float) renderBufferWidth);
             GLES20.glEnableVertexAttribArray(radialBlurInputTexCoordHandle);
@@ -1927,7 +1927,7 @@ public class FilterShaders {
             GLES20.glUniform1f(linearBlurExcludeSizeHandle, delegate.getBlurExcludeSize());
             GLES20.glUniform1f(linearBlurExcludeBlurSizeHandle, delegate.getBlurExcludeBlurSize());
             GLES20.glUniform1f(linearBlurAngleHandle, delegate.getBlurAngle());
-            Point blurExcludePoint = delegate.getBlurExcludePoint();
+            PointF blurExcludePoint = delegate.getBlurExcludePoint();
             GLES20.glUniform2f(linearBlurExcludePointHandle, blurExcludePoint.x, blurExcludePoint.y);
             GLES20.glUniform1f(linearBlurAspectRatioHandle, (float) renderBufferHeight / (float) renderBufferWidth);
             GLES20.glEnableVertexAttribArray(linearBlurInputTexCoordHandle);
@@ -1980,7 +1980,7 @@ public class FilterShaders {
         if (bitmap != null && !bitmap.isRecycled()) {
             GLES20.glGenTextures(1, bitmapTextre, 0);
 
-            float maxSize = AndroidUtilities.getPhotoSize();
+            float maxSize = AndroidUtilities.getPhotoSize(true);
             if (scaleBitmap && (renderBufferWidth > maxSize || renderBufferHeight > maxSize) || orientation % 360 != 0) {
                 float scale = 1;
                 if (scaleBitmap && (renderBufferWidth > maxSize || renderBufferHeight > maxSize)) {
@@ -2174,7 +2174,7 @@ public class FilterShaders {
             }
 
             @Override
-            public Point getBlurExcludePoint() {
+            public PointF getBlurExcludePoint() {
                 return lastState.blurExcludePoint;
             }
 

@@ -1,8 +1,12 @@
 package org.telegram.ui;
 
+import static org.telegram.messenger.AndroidUtilities.distance;
 import static org.telegram.messenger.AndroidUtilities.dp;
 import static org.telegram.messenger.AndroidUtilities.dpf2;
 import static org.telegram.messenger.AndroidUtilities.lerp;
+import static org.telegram.messenger.LocaleController.formatPluralStringComma;
+import static org.telegram.messenger.LocaleController.getString;
+import static org.telegram.ui.Stars.StarsController.findAttribute;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
@@ -17,23 +21,21 @@ import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
-import android.graphics.LinearGradient;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffColorFilter;
 import android.graphics.PorterDuffXfermode;
+import android.graphics.RadialGradient;
+import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
-import android.text.Spannable;
-import android.text.SpannableString;
 import android.text.SpannableStringBuilder;
 import android.text.Spanned;
-import android.text.style.DynamicDrawableSpan;
-import android.text.style.ImageSpan;
+import android.text.TextPaint;
+import android.text.TextUtils;
 import android.text.style.ReplacementSpan;
 import android.util.SparseIntArray;
 import android.util.TypedValue;
@@ -43,12 +45,18 @@ import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 import android.widget.ImageView;
+import android.widget.LinearLayout;
 import android.widget.TextView;
 
 import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
+import androidx.core.graphics.Insets;
+import androidx.core.math.MathUtils;
+import androidx.core.view.ViewCompat;
+import androidx.core.view.WindowInsetsCompat;
 import androidx.recyclerview.widget.DefaultItemAnimator;
+import androidx.recyclerview.widget.GridLayoutManager;
 import androidx.recyclerview.widget.LinearLayoutManager;
 import androidx.recyclerview.widget.RecyclerView;
 
@@ -56,31 +64,48 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.ChatObject;
+import org.telegram.messenger.DialogObject;
+import org.telegram.messenger.DocumentObject;
 import org.telegram.messenger.Emoji;
+import org.telegram.messenger.FileLoader;
+import org.telegram.messenger.FileLog;
+import org.telegram.messenger.ImageLocation;
 import org.telegram.messenger.ImageReceiver;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.NotificationCenter;
 import org.telegram.messenger.R;
+import org.telegram.messenger.SvgHelper;
 import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.UserObject;
 import org.telegram.messenger.Utilities;
+import org.telegram.messenger.utils.DrawableUtils;
+import org.telegram.messenger.utils.ViewOutlineProviderImpl;
+import org.telegram.messenger.utils.tlutils.AmountUtils;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.tl.TL_account;
+import org.telegram.tgnet.tl.TL_stars;
 import org.telegram.ui.ActionBar.ActionBar;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.BaseFragment;
+import org.telegram.ui.ActionBar.EdgeToEdgeSupportMode;
+import org.telegram.ui.ActionBar.MessageDrawable;
 import org.telegram.ui.ActionBar.SimpleTextView;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.ActionBar.ThemeDescription;
 import org.telegram.ui.Cells.ChatMessageCell;
+import org.telegram.ui.Cells.HeaderCell;
 import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Cells.ThemePreviewMessagesCell;
 import org.telegram.ui.Components.AnimatedColor;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
+import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.AvatarDrawable;
+import org.telegram.ui.Components.BackupImageView;
 import org.telegram.ui.Components.Bulletin;
 import org.telegram.ui.Components.BulletinFactory;
 import org.telegram.ui.Components.ButtonBounce;
@@ -88,59 +113,104 @@ import org.telegram.ui.Components.ColoredImageSpan;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.Easings;
 import org.telegram.ui.Components.FilledTabsView;
+import org.telegram.ui.Components.FlickerLoadingView;
 import org.telegram.ui.Components.LayoutHelper;
+import org.telegram.ui.Components.LinkSpanDrawable;
 import org.telegram.ui.Components.Premium.PremiumFeatureBottomSheet;
 import org.telegram.ui.Components.Premium.PremiumGradient;
 import org.telegram.ui.Components.RLottieDrawable;
 import org.telegram.ui.Components.RecyclerListView;
+import org.telegram.ui.Components.ScaleStateListAnimator;
 import org.telegram.ui.Components.SimpleThemeDescription;
 import org.telegram.ui.Components.Text;
+import org.telegram.ui.Components.TextHelper;
+import org.telegram.ui.Components.UItem;
+import org.telegram.ui.Components.UniversalAdapter;
+import org.telegram.ui.Components.UniversalRecyclerView;
 import org.telegram.ui.Components.ViewPagerFixed;
+import org.telegram.ui.Components.blur3.BlurredBackgroundDrawableViewFactory;
+import org.telegram.ui.Components.blur3.BlurredBackgroundWithFadeDrawable;
+import org.telegram.ui.Components.blur3.drawable.BlurredBackgroundDrawable;
+import org.telegram.ui.Components.blur3.drawable.color.impl.BlurredBackgroundProviderImpl;
+import org.telegram.utils.glass.source.GlassSourceColor;
+import org.telegram.ui.Gifts.GiftSheet;
+import org.telegram.ui.Gifts.ResaleGiftsFragment;
+import org.telegram.ui.Stars.StarGiftPatterns;
+import org.telegram.ui.Stars.StarGiftSheet;
+import org.telegram.ui.Stars.StarsController;
+import org.telegram.ui.Stars.StarsIntroActivity;
 import org.telegram.ui.Stories.StoriesUtilities;
 import org.telegram.ui.Stories.recorder.ButtonWithCounterView;
 
 import java.io.File;
 import java.util.ArrayList;
+import java.util.HashMap;
+import java.util.HashSet;
 import java.util.List;
+
+import me.vkryl.core.reference.ReferenceList;
 
 public class PeerColorActivity extends BaseFragment implements NotificationCenter.NotificationCenterDelegate {
 
     private final boolean isChannel;
     private final long dialogId;
 
+    private final StarsController.GiftsList gifts;
+    private final StarsController.GiftsList giftsWithPeerColor;
+
     private FrameLayout contentView;
     private ColoredActionBar colorBar;
 
-    public static final int PAGE_NAME = 0;
-    public static final int PAGE_PROFILE = 1;
+    public static final int PAGE_PROFILE = 0;
+    public static final int PAGE_NAME = 1;
+
+    private int tabsPinOffset = dp(6);
 
     public Page namePage;
     public Page profilePage;
 
     public Page getCurrentPage() {
-        return viewPager.getCurrentPosition() == 0 ? namePage : profilePage;
+        return viewPager.getCurrentPosition() == PAGE_PROFILE ? profilePage : namePage;
     }
 
     public boolean loading;
+
+    private final class ButtonState {
+        private CharSequence text;
+        private CharSequence subText;
+    }
 
     private class Page extends FrameLayout {
 
         private ProfilePreview profilePreview;
 
         private RecyclerListView listView;
+        private GridLayoutManager layoutManager;
         private RecyclerView.Adapter listAdapter;
-        private FrameLayout buttonContainer;
-        private ButtonWithCounterView button;
+        private final ButtonState buttonState = new ButtonState();
         private PeerColorGrid peerColorPicker;
 
         private int selectedColor = -1;
         private long selectedEmoji = 0;
+        private TLRPC.TL_emojiStatusCollectible selectedEmojiCollectible = null;
+        private TLRPC.TL_peerColorCollectible selectedPeerCollectible = null;
         private ThemePreviewMessagesCell messagesCellPreview;
+        private View messagesCellFade;
+        private View messagesCellFade2;
         private SetReplyIconCell setReplyIconCell;
+        private Tabs giftTabsView;
+        private View giftTabsPlaceholder;
+        private boolean drawGiftTabsInList;
+        private boolean giftTabsPinned;
+        private TL_stars.TL_starGiftUnique selectedResaleGift;
+        private ResaleGiftsFragment.ResaleGiftsList resaleGifts;
+        private TL_stars.StarGift selectedTabGift = null;
 
-        private CharSequence buttonLocked, buttonUnlocked;
+        private final ArrayList<CharSequence> tabs = new ArrayList<>();
+        private final HashMap<Integer, TL_stars.StarGift> index2gift = new HashMap<>();
 
-        int previewRow = -1;
+        private CharSequence buttonLocked, buttonUnlocked, buttonCollectible;
+
         int colorPickerRow = -1;
         int infoRow = -1;
         int iconRow = -1;
@@ -148,7 +218,18 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         int buttonRow = -1;
         int clearRow = -1;
         int shadowRow = -1;
+        int giftsHeaderRow = -1;
+        int giftsStartRow = -1;
+        int giftsEndRow = -1;
+        int giftsLoadingStartRow = -1;
+        int giftsLoadingEndRow = -1;
+        int giftsCount = 0;
+        int giftsInfoRow = -1;
+        int giftsTabsRow = -1;
+        int giftsEmptyRow = -1;
+        int giftsEmptyRowGap = -1;
         int rowCount;
+        final ArrayList<TL_stars.TL_starGiftUnique> uniqueGifts = new ArrayList<>();
 
         private static final int VIEW_TYPE_MESSAGE = 0;
         private static final int VIEW_TYPE_COLOR_PICKER = 1;
@@ -156,53 +237,128 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         private static final int VIEW_TYPE_ICON = 3;
         private static final int VIEW_TYPE_BUTTONPAD = 5;
         private static final int VIEW_TYPE_TEXT = 6;
+        private static final int VIEW_TYPE_HEADER = 7;
+        private static final int VIEW_TYPE_GIFT = 8;
+        private static final int VIEW_TYPE_FLICKER = 9;
+        private static final int VIEW_TYPE_TABS = 10;
+        private static final int VIEW_TYPE_GIFTS_EMPTY = 11;
+        private static final int VIEW_TYPE_GIFT_FOREIGN = 12;
 
-        private final int type;
-        public Page(Context context, int type) {
-            super(context);
-            this.type = type;
-
+        public void setupValues() {
             if (type == PAGE_PROFILE) {
                 if (dialogId < 0) {
                     TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
                     selectedColor = ChatObject.getProfileColorId(chat);
                     selectedEmoji = ChatObject.getProfileEmojiId(chat);
+                    selectedEmojiCollectible = chat != null && chat.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? (TLRPC.TL_emojiStatusCollectible) chat.emoji_status : null;
+                    selectedPeerCollectible = null;
                 } else {
                     TLRPC.User user = getUserConfig().getCurrentUser();
                     selectedColor = UserObject.getProfileColorId(user);
                     selectedEmoji = UserObject.getProfileEmojiId(user);
+                    selectedEmojiCollectible = user != null && user.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? (TLRPC.TL_emojiStatusCollectible) user.emoji_status : null;
+                    selectedPeerCollectible = null;
                 }
             } else {
                 if (dialogId < 0) {
                     TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
                     selectedColor = ChatObject.getColorId(chat);
                     selectedEmoji = ChatObject.getEmojiId(chat);
+                    selectedEmojiCollectible = null;
+                    selectedPeerCollectible = chat != null && chat.color instanceof TLRPC.TL_peerColorCollectible ? (TLRPC.TL_peerColorCollectible) chat.color : null;
                 } else {
                     TLRPC.User user = getUserConfig().getCurrentUser();
                     selectedColor = UserObject.getColorId(user);
                     selectedEmoji = UserObject.getEmojiId(user);
+                    selectedEmojiCollectible = null;
+                    selectedPeerCollectible = user != null && user.color instanceof TLRPC.TL_peerColorCollectible ? (TLRPC.TL_peerColorCollectible) user.color : null;
                 }
             }
+            if (selectedEmojiCollectible != null || selectedPeerCollectible != null) {
+                selectedColor = -1;
+                selectedEmoji = 0;
+            }
+
+        }
+
+        private final int type;
+        public Page(Context context, int type) {
+            super(context);
+            this.type = type;
+            this.setupValues();
 
             listView = new RecyclerListView(getContext(), getResourceProvider()) {
                 @Override
-                protected void onMeasure(int widthSpec, int heightSpec) {
-                    super.onMeasure(widthSpec, heightSpec);
-                    updateButtonY();
+                protected void onLayout(boolean changed, int l, int t, int r, int b) {
+                    super.onLayout(changed, l, t, r, b);
+                    updateGiftTabsPosition();
+                    if (selectedTabGift != null) {
+                        if (resaleGifts != null && seesLoading()) {
+                            resaleGifts.load();
+                        }
+                    } else {
+                        final StarsController.GiftsList giftsList = type == PAGE_NAME ? giftsWithPeerColor : gifts;
+                        if (giftsList != null && seesLoading()) {
+                            giftsList.load();
+                        }
+                    }
                 }
 
                 @Override
-                protected void onLayout(boolean changed, int l, int t, int r, int b) {
-                    super.onLayout(changed, l, t, r, b);
-                    updateButtonY();
+                public Integer getSelectorColor(int position) {
+                    if (position >= giftsStartRow && position < giftsEndRow || position >= giftsLoadingStartRow && position < giftsLoadingEndRow) {
+                        return 0x00000000;
+                    }
+                    return super.getSelectorColor(position);
+                }
+
+                @Override
+                protected void dispatchDraw(@NonNull Canvas canvas) {
+                    super.dispatchDraw(canvas);
+                    if (drawGiftTabsInList && giftTabsView != null && giftTabsPlaceholder != null) {
+                        final int saveCount = canvas.save();
+                        canvas.translate(giftTabsPlaceholder.getLeft() + giftTabsView.getLeft(), giftTabsPlaceholder.getTop());
+                        giftTabsView.draw(canvas);
+                        canvas.restoreToCount(saveCount);
+                    }
                 }
             };
+            listView.setClipToPadding(false);
+            listView.setSections(true);
+
             ((DefaultItemAnimator) listView.getItemAnimator()).setSupportsChangeAnimations(false);
-            listView.setLayoutManager(new LinearLayoutManager(getContext()));
+            layoutManager = new GridLayoutManager(getContext(), 3);
+            layoutManager.setSpanSizeLookup(new GridLayoutManager.SpanSizeLookup() {
+                @Override
+                public int getSpanSize(int position) {
+                    if (position >= giftsStartRow && position < giftsEndRow) {
+                        return 1;
+                    }
+                    if (position >= giftsLoadingStartRow && position < giftsLoadingEndRow) {
+                        return 1;
+                    }
+                    return 3;
+                }
+            });
+            listView.addItemDecoration(new RecyclerView.ItemDecoration() {
+                @Override
+                public void getItemOffsets(@NonNull Rect outRect, @NonNull View view, @NonNull RecyclerView parent, @NonNull RecyclerView.State state) {
+                    final int position = parent.getChildAdapterPosition(view);
+                    if (position < giftsStartRow || position >= giftsStartRow + giftsCount) return;
+                    final int index = position - giftsStartRow;
+                    final boolean up = index / 3 == 0, down = index / 3 == (giftsCount - 1) / 3;
+                    final boolean left = index % 3 == 0, right = index % 3 == 2;
+                    outRect.top = up ? dp(8) : 0;
+                    outRect.bottom = down ? dp(8) : 0;
+                    outRect.left = left ? dp(10) : 0;
+                    outRect.right = right ? dp(10) : 0;
+                }
+            });
+            listView.setLayoutManager(layoutManager);
             listView.setAdapter(listAdapter = new RecyclerListView.SelectionAdapter() {
                 @Override
                 public boolean isEnabled(RecyclerView.ViewHolder holder) {
-                    return holder.getItemViewType() == VIEW_TYPE_ICON || holder.getItemViewType() == VIEW_TYPE_TEXT;
+                    return holder.getItemViewType() == VIEW_TYPE_ICON || holder.getItemViewType() == VIEW_TYPE_TEXT || holder.getItemViewType() == VIEW_TYPE_GIFT || holder.getItemViewType() == VIEW_TYPE_GIFT_FOREIGN;
                 }
 
                 @NonNull
@@ -210,13 +366,27 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
                     View view;
                     switch (viewType) {
-                        case VIEW_TYPE_MESSAGE:
-                            ThemePreviewMessagesCell messagesCell = messagesCellPreview = new ThemePreviewMessagesCell(getContext(), parentLayout, ThemePreviewMessagesCell.TYPE_PEER_COLOR, dialogId, resourceProvider);
-                            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.KITKAT) {
-                                messagesCell.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
-                            }
-                            messagesCell.fragment = PeerColorActivity.this;
-                            view = messagesCell;
+                        case VIEW_TYPE_HEADER:
+                            HeaderCell headerCell = new HeaderCell(getContext(), resourceProvider);
+                            ThemeBind.backgroundColor(headerCell, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
+                            view = headerCell;
+                            break;
+                        case VIEW_TYPE_GIFT:
+                            GiftCell giftCell = new GiftCell(getContext(), false, resourceProvider);
+                            giftCell.setTag(RecyclerListView.TAG_NOT_SECTION);
+                            view = giftCell;
+                            break;
+                        case VIEW_TYPE_GIFT_FOREIGN:
+                            GiftSheet.GiftCell giftCell2 = new GiftSheet.GiftCell(getContext(), currentAccount, resourceProvider);
+                            giftCell2.setTag(RecyclerListView.TAG_NOT_SECTION);
+                            view = giftCell2;
+                            break;
+                        case VIEW_TYPE_FLICKER:
+                            FlickerLoadingView flickerLoadingView = new FlickerLoadingView(context, resourceProvider);
+                            flickerLoadingView.setIsSingleCell(true);
+                            flickerLoadingView.setViewType(FlickerLoadingView.STAR_GIFT_SELECT);
+                            flickerLoadingView.setTag(RecyclerListView.TAG_NOT_SECTION);
+                            view = flickerLoadingView;
                             break;
                         default:
                         case VIEW_TYPE_INFO:
@@ -225,35 +395,28 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                             break;
                         case VIEW_TYPE_COLOR_PICKER:
                             PeerColorGrid colorPicker = peerColorPicker = new PeerColorGrid(getContext(), type, currentAccount, resourceProvider);
-                            colorPicker.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                            ThemeBind.backgroundColor(colorPicker, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
                             colorPicker.setSelected(selectedColor, false);
                             colorPicker.setOnColorClick(colorId -> {
                                 selectedColor = colorId;
-                                colorPicker.setSelected(colorId, true);
+                                selectedEmojiCollectible = null;
+                                selectedPeerCollectible = null;
+                                selectedResaleGift = null;
+                                updateProfilePreview(true);
                                 updateMessages();
+                                updateButton(true);
                                 if (setReplyIconCell != null) {
                                     setReplyIconCell.invalidate();
-                                }
-                                if (type == PAGE_PROFILE && colorBar != null) {
-                                    colorBar.setColor(currentAccount, selectedColor, true);
-                                }
-                                if (profilePreview != null) {
-                                    profilePreview.setColor(selectedColor, true);
                                 }
                                 if (profilePage != null && profilePage.profilePreview != null && namePage != null) {
                                     profilePage.profilePreview.overrideAvatarColor(namePage.selectedColor);
                                 }
-                                checkResetColorButton();
                             });
                             view = colorPicker;
                             break;
                         case VIEW_TYPE_BUTTONPAD:
-                            view = new View(getContext()) {
-                                @Override
-                                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-                                    super.onMeasure(widthMeasureSpec, MeasureSpec.makeMeasureSpec(dp(14 + 48 + 14), MeasureSpec.EXACTLY));
-                                }
-                            };
+                            view = new View(getContext());
+                            view.setTag(RecyclerListView.TAG_NOT_SECTION);
                             break;
                         case VIEW_TYPE_ICON:
                             SetReplyIconCell setcell = setReplyIconCell = new SetReplyIconCell(getContext());
@@ -262,7 +425,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                             break;
                         case VIEW_TYPE_TEXT:
                             TextCell textCell = new TextCell(getContext(), getResourceProvider());
-                            textCell.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                            ThemeBind.backgroundColor(textCell, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
                             view = textCell;
                             break;
                         case 4:
@@ -271,11 +434,23 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                                 protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
                                     super.onMeasure(
                                             MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY),
-                                            MeasureSpec.makeMeasureSpec(dp(16), MeasureSpec.EXACTLY)
+                                            MeasureSpec.makeMeasureSpec(dp(12), MeasureSpec.EXACTLY)
                                     );
                                 }
                             };
-                            view.setBackground(Theme.getThemedDrawableByKey(getContext(), R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                            view.setTag(RecyclerListView.TAG_NOT_SECTION);
+                            break;
+                        case VIEW_TYPE_TABS:
+                            view = new View(getContext()) {
+                                @Override
+                                protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+                                    setMeasuredDimension(MeasureSpec.getSize(widthMeasureSpec), dp(36));
+                                }
+                            };
+                            view.setTag(RecyclerListView.TAG_NOT_SECTION);
+                            break;
+                        case VIEW_TYPE_GIFTS_EMPTY:
+                            view = new EmptyView(getContext());
                             break;
                     }
                     return new RecyclerListView.Holder(view);
@@ -286,26 +461,151 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     switch (getItemViewType(position)) {
                         case VIEW_TYPE_INFO:
                             TextInfoPrivacyCell cell = (TextInfoPrivacyCell) holder.itemView;
+                            cell.setFixedSize(0);
                             if (position == infoRow) {
+                                String text;
                                 if (type == PAGE_NAME) {
-                                    cell.setText(LocaleController.getString(isChannel ? R.string.ChannelColorHint : R.string.UserColorHint));
+                                    text = getString(isChannel ? R.string.ChannelColorHint : R.string.UserColorHint);
                                 } else {
-                                    cell.setText(LocaleController.getString(isChannel ? R.string.ChannelProfileHint : R.string.UserProfileHint));
+                                    text = getString(isChannel ? R.string.ChannelProfileHint : R.string.UserProfileHint2);
                                 }
-                                cell.setBackground(Theme.getThemedDrawableByKey(getContext(), clearRow >= 0 ? R.drawable.greydivider : R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                                cell.setText(AndroidUtilities.replaceArrows(AndroidUtilities.replaceSingleTag(text, () -> {
+                                    viewPager.scrollToPosition(1 - type);
+                                }), true));
                             } else if (position == shadowRow) {
                                 cell.setText("");
-                                cell.setBackground(Theme.getThemedDrawableByKey(getContext(), R.drawable.greydivider_bottom, Theme.key_windowBackgroundGrayShadow));
+                                cell.setFixedSize(12);
+                            } else if (position == giftsInfoRow) {
+                                cell.setText(getString(R.string.UserProfileCollectibleInfo));
                             }
                             break;
                         case VIEW_TYPE_TEXT:
                             TextCell textCell = (TextCell) holder.itemView;
                             textCell.updateColors();
-                            textCell.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                            ThemeBind.backgroundColor(textCell, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
+                            textCell.updateColors();
                             if (position == clearRow) {
-                                textCell.setText(LocaleController.getString(isChannel ? R.string.ChannelProfileColorReset : R.string.UserProfileColorReset), false);
+                                textCell.setText(getString(isChannel ? R.string.ChannelProfileColorReset : R.string.UserProfileColorReset), false);
                             }
                             break;
+                        case VIEW_TYPE_HEADER:
+                            HeaderCell headerCell = (HeaderCell) holder.itemView;
+                            if (position == giftsHeaderRow) {
+                                headerCell.setText(getString(R.string.UserProfileCollectibleHeader), false);
+                            }
+                            ThemeBind.backgroundColor(headerCell, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
+                            break;
+                        case VIEW_TYPE_GIFT:
+                            GiftCell giftCell = (GiftCell) holder.itemView;
+                            final int index = position - giftsStartRow;
+                            if (index < 0 || index >= uniqueGifts.size()) return;
+                            final TL_stars.TL_starGiftUnique gift = uniqueGifts.get(index);
+                            giftCell.set(index, gift);
+                            giftCell.setSelected(
+                                    selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == gift.id ||
+                                            selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == gift.id,
+                                    false
+                            );
+                            giftCell.card.invalidate();
+                            break;
+                        case VIEW_TYPE_GIFT_FOREIGN:
+                            GiftSheet.GiftCell giftCell2 = (GiftSheet.GiftCell) holder.itemView;
+                            final int index2 = position - giftsStartRow;
+                            if (resaleGifts == null) return;
+                            if (index2 < 0 || index2 >= uniqueGifts.size()) return;
+                            final TL_stars.TL_starGiftUnique gift2 = uniqueGifts.get(index2);
+                            giftCell2.setStarsGift(gift2, false, false, false, true, false);
+                            giftCell2.setSelected(
+                                    selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == gift2.id ||
+                                            selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == gift2.id,
+                                    false
+                            );
+                            break;
+                        case VIEW_TYPE_TABS:
+                            giftTabsPlaceholder = holder.itemView;
+                            final Tabs tabsView = giftTabsView;
+                            tabs.clear();
+                            index2gift.clear();
+                            final ArrayList<TL_stars.StarGift> gifts = StarsController.getInstance(currentAccount).sortedGifts;
+                            tabs.add(getString(R.string.Gift2TabMine));
+                            int selectedTab = 0;
+                            for (int i = 0; i < gifts.size(); ++i) {
+                                final TL_stars.StarGift starGift = gifts.get(i);
+                                if ((type == PAGE_PROFILE || type == PAGE_NAME && starGift.peer_color_available) && starGift.availability_resale > 0) {
+                                    if (selectedTabGift == starGift) {
+                                        selectedTab = tabs.size();
+                                    }
+                                    index2gift.put(tabs.size(), starGift);
+                                    final TextPaint textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
+                                    textPaint.setTextSize(dp(14));
+                                    final SpannableStringBuilder sb = new SpannableStringBuilder("x ");
+                                    final AnimatedEmojiSpan span = new AnimatedEmojiSpan(starGift.getDocument(), textPaint.getFontMetricsInt());
+                                    span.size = dp(14);
+                                    sb.setSpan(span, 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+                                    sb.append(starGift.title);
+                                    tabs.add(sb);
+                                }
+                            }
+                            tabsView.set(0, tabs, selectedTab, tabIndex -> {
+                                selectedTabGift = tabIndex == 0 ? null : index2gift.get(tabIndex);
+                                if (selectedTabGift == null) {
+                                    if (resaleGifts != null) {
+                                        resaleGifts.cancel();
+                                        resaleGifts = null;
+                                    }
+                                } else if (resaleGifts == null || resaleGifts.gift_id != selectedTabGift.id) {
+                                    resaleGifts = new ResaleGiftsFragment.ResaleGiftsList(currentAccount, selectedTabGift.id, first -> update());
+                                    resaleGifts.load();
+                                }
+                                updateAfterGiftTabSelected();
+                                final Page otherPage = viewPager.getCurrentPosition() == PAGE_NAME ? profilePage : namePage;
+                                otherPage.update();
+                            });
+                            updateTabsColors(tabsView);
+                            holder.itemView.post(Page.this::updateGiftTabsPosition);
+                            break;
+                        case VIEW_TYPE_COLOR_PICKER:
+                            ThemeBind.backgroundColor(holder.itemView, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
+                            ((PeerColorGrid) holder.itemView).updateColors();
+                            break;
+                        case VIEW_TYPE_ICON:
+                            ((SetReplyIconCell) holder.itemView).updateColors();
+                            break;
+                        case VIEW_TYPE_GIFTS_EMPTY:
+                            ((EmptyView) holder.itemView).updateColors();
+                            break;
+                    }
+                }
+
+                @Override
+                public void onViewAttachedToWindow(@NonNull RecyclerView.ViewHolder holder) {
+                    super.onViewAttachedToWindow(holder);
+                    if (holder.getItemViewType() == VIEW_TYPE_TABS) {
+                        giftTabsPlaceholder = holder.itemView;
+                        holder.itemView.post(Page.this::updateGiftTabsPosition);
+                    } else if (holder.getItemViewType() == VIEW_TYPE_GIFT) {
+                        GiftCell giftCell = (GiftCell) holder.itemView;
+                        final int index = holder.getAdapterPosition() - giftsStartRow;
+                        if (index < 0 || index >= uniqueGifts.size()) return;
+                        final TL_stars.TL_starGiftUnique gift = uniqueGifts.get(index);
+                        giftCell.set(index, gift);
+                        giftCell.setSelected(
+                                selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == gift.id ||
+                                        selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == gift.id,
+                                false
+                        );
+                    } else if (holder.getItemViewType() == VIEW_TYPE_GIFT_FOREIGN) {
+                        GiftSheet.GiftCell giftCell2 = (GiftSheet.GiftCell) holder.itemView;
+                        final int index2 = holder.getAdapterPosition() - giftsStartRow;
+                        if (resaleGifts == null) return;
+                        if (index2 < 0 || index2 >= uniqueGifts.size()) return;
+                        final TL_stars.TL_starGiftUnique gift2 = uniqueGifts.get(index2);
+                        giftCell2.setStarsGift(gift2, false, false, false, true, false);
+                        giftCell2.setSelected(
+                                selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == gift2.id ||
+                                        selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == gift2.id,
+                                false
+                        );
                     }
                 }
 
@@ -316,10 +616,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
                 @Override
                 public int getItemViewType(int position) {
-                    if (position == previewRow) {
-                        return VIEW_TYPE_MESSAGE;
-                    }
-                    if (position == infoRow || position == info2Row || position == shadowRow) {
+                    if (position == infoRow || position == giftsInfoRow || position == info2Row || position == shadowRow) {
                         return VIEW_TYPE_INFO;
                     }
                     if (position == colorPickerRow) {
@@ -334,7 +631,26 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     if (position == clearRow) {
                         return VIEW_TYPE_TEXT;
                     }
-                    if (position == getItemCount() - 1) {
+                    if (position == giftsTabsRow) {
+                        return VIEW_TYPE_TABS;
+                    }
+                    if (position == giftsEmptyRow) {
+                        return VIEW_TYPE_GIFTS_EMPTY;
+                    }
+                    if (position == giftsHeaderRow) {
+                        return VIEW_TYPE_HEADER;
+                    }
+                    if (position >= giftsStartRow && position < giftsEndRow) {
+                        if (selectedTabGift == null) {
+                            return VIEW_TYPE_GIFT;
+                        } else {
+                            return VIEW_TYPE_GIFT_FOREIGN;
+                        }
+                    }
+                    if (position >= giftsLoadingStartRow && position < giftsLoadingEndRow) {
+                        return VIEW_TYPE_FLICKER;
+                    }
+                    if (position == getItemCount() - 1 || position == giftsEmptyRowGap) {
                         return 4;
                     }
                     return VIEW_TYPE_INFO;
@@ -346,9 +662,9 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 } else if (position == clearRow) {
                     selectedColor = -1;
                     selectedEmoji = 0;
-                    if (peerColorPicker != null) {
-                        peerColorPicker.setSelected(selectedColor, true);
-                    }
+                    selectedEmojiCollectible = null;
+                    selectedPeerCollectible = null;
+                    selectedResaleGift = null;
                     updateMessages();
                     if (type == PAGE_PROFILE) {
                         namePage.updateMessages();
@@ -356,43 +672,89 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     if (setReplyIconCell != null) {
                         setReplyIconCell.update(true);
                     }
-                    if (type == PAGE_PROFILE && colorBar != null) {
-                        colorBar.setColor(currentAccount, selectedColor, true);
-                    }
-                    if (profilePreview != null) {
-                        profilePreview.setColor(selectedColor, true);
-                        profilePreview.setEmoji(selectedEmoji, true);
-                    }
+                    updateProfilePreview(true);
+                    updateButton(true);
                     if (profilePage != null && profilePage.profilePreview != null && namePage != null) {
                         profilePage.profilePreview.overrideAvatarColor(namePage.selectedColor);
                     }
-                    checkResetColorButton();
+                } else if (position >= giftsStartRow && position < giftsEndRow) {
+                    final int index = position - giftsStartRow;
+                    if (selectedTabGift == null) {
+                        if (index < 0 || index >= uniqueGifts.size()) return;
+                        final TL_stars.TL_starGiftUnique gift = uniqueGifts.get(index);
+                        if (type == PAGE_NAME) {
+                            if (!(gift.peer_color instanceof TLRPC.TL_peerColorCollectible)) return;
+                            selectedEmoji = 0;
+                            selectedColor = -1;
+                            selectedResaleGift = null;
+                            selectedEmojiCollectible = null;
+                            selectedPeerCollectible = (TLRPC.TL_peerColorCollectible) gift.peer_color;
+                        } else {
+                            selectedEmoji = 0;
+                            selectedColor = -1;
+                            selectedResaleGift = null;
+                            selectedEmojiCollectible = MessagesController.emojiStatusCollectibleFromGift(gift);
+                            selectedPeerCollectible = null;
+                        }
+                        updateProfilePreview(true);
+                        updateMessages();
+                        updateButton(true);
+                        if (setReplyIconCell != null) {
+                            setReplyIconCell.update(true);
+                        }
+                    } else if (resaleGifts != null) {
+                        if (index < 0 || index >= uniqueGifts.size()) return;
+                        final TL_stars.TL_starGiftUnique gift = uniqueGifts.get(index);
+                        if (type == PAGE_NAME) {
+                            if (!(gift.peer_color instanceof TLRPC.TL_peerColorCollectible)) return;
+                            selectedEmoji = 0;
+                            selectedColor = -1;
+                            selectedEmojiCollectible = null;
+                            selectedPeerCollectible = (TLRPC.TL_peerColorCollectible) gift.peer_color;
+                        } else {
+                            selectedEmoji = 0;
+                            selectedColor = -1;
+                            selectedEmojiCollectible = MessagesController.emojiStatusCollectibleFromGift(gift);
+                            selectedPeerCollectible = null;
+                        }
+                        selectedResaleGift = gift;
+                        updateProfilePreview(true);
+                        updateMessages();
+                        updateButton(true);
+                        if (setReplyIconCell != null) {
+                            setReplyIconCell.update(true);
+                        }
+                    }
+                }
+            });
+            listView.addOnScrollListener(new RecyclerView.OnScrollListener() {
+                @Override
+                public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
+                    super.onScrolled(recyclerView, dx, dy);
+
+                    updateGiftTabsPosition();
+                    if (selectedTabGift != null) {
+                        if (resaleGifts != null && seesLoading()) {
+                            resaleGifts.load();
+                        }
+                    } else {
+                        final StarsController.GiftsList giftsList = type == PAGE_NAME ? giftsWithPeerColor : gifts;
+                        if (giftsList != null && seesLoading()) {
+                            giftsList.load();
+                        }
+                    }
                 }
             });
             addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
 
-            buttonContainer = new FrameLayout(getContext());
-            buttonContainer.setPadding(dp(14), dp(14), dp(14), dp(14));
-            buttonContainer.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundGray));
-
             SpannableStringBuilder buttonLock = new SpannableStringBuilder("l");
             buttonLock.setSpan(new ColoredImageSpan(R.drawable.msg_mini_lock2), 0, 1, Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-            buttonUnlocked = LocaleController.getString(isChannel ? R.string.ChannelColorApply : R.string.UserColorApplyIcon);
+            buttonUnlocked = getString(isChannel ? R.string.ChannelColorApply : R.string.UserColorApply);
             buttonLocked = new SpannableStringBuilder(buttonLock).append(" ").append(buttonUnlocked);
+            buttonCollectible = getString(R.string.UserColorApplyCollectible);
 
-            button = new ButtonWithCounterView(getContext(), getResourceProvider());
-            button.text.setHacks(true, true, true);
-            button.setText(isChannel ? buttonUnlocked : (!getUserConfig().isPremium() ? buttonLocked : buttonUnlocked), false);
-            button.setOnClickListener(v -> buttonClick());
-            buttonContainer.addView(button, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48));
+            updateButton(false);
 
-            addView(buttonContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
-            listView.setOnScrollListener(new RecyclerView.OnScrollListener() {
-                @Override
-                public void onScrolled(@NonNull RecyclerView recyclerView, int dx, int dy) {
-                    updateButtonY();
-                }
-            });
             DefaultItemAnimator itemAnimator = new DefaultItemAnimator();
             itemAnimator.setDurations(350);
             itemAnimator.setInterpolator(CubicBezierInterpolator.EASE_OUT_QUINT);
@@ -400,10 +762,60 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             itemAnimator.setSupportsChangeAnimations(false);
             listView.setItemAnimator(itemAnimator);
 
+            messagesCellFade = new View(getContext());
+            BlurredBackgroundWithFadeDrawable fade = new BlurredBackgroundWithFadeDrawable(iBlur3BackgroundFactory.create(messagesCellFade));
+            fade.setFadeHeight(-dp(24), true);
+            fade.setAlpha(220);
+            messagesCellFade.setBackground(fade);
+            addView(messagesCellFade, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 72, Gravity.TOP | Gravity.FILL_HORIZONTAL));
+
             if (type == PAGE_PROFILE) {
                 profilePreview = new ProfilePreview(getContext(), currentAccount, dialogId, resourceProvider);
-                profilePreview.setColor(selectedColor, false);
-                profilePreview.setEmoji(selectedEmoji, false);
+                updateProfilePreview(false);
+            } else {
+                messagesCellFade2 = new View(getContext());
+                BlurredBackgroundWithFadeDrawable fade2 = new BlurredBackgroundWithFadeDrawable(iBlur3BackgroundFactory.create(messagesCellFade2));
+                fade2.setFadeHeight(-dp(16), false);
+                messagesCellFade2.setBackground(fade2);
+                addView(messagesCellFade2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 16, Gravity.TOP | Gravity.FILL_HORIZONTAL));
+
+                messagesCellPreview = new ThemePreviewMessagesCell(getContext(), parentLayout, ThemePreviewMessagesCell.TYPE_PEER_COLOR, dialogId, resourceProvider) {
+                    @Override
+                    public void draw(@NonNull Canvas canvas) {
+                        if (canvas.isHardwareAccelerated()) {
+                            super.draw(canvas);
+                        } else {
+                            ViewOutlineProviderImpl.drawViewWithOutline(canvas, this, super::draw);
+                        }
+                    }
+                };
+                messagesCellPreview.setImportantForAccessibility(View.IMPORTANT_FOR_ACCESSIBILITY_NO_HIDE_DESCENDANTS);
+                messagesCellPreview.fragment = PeerColorActivity.this;
+                messagesCellPreview.setClipToOutline(true);
+                messagesCellPreview.setOutlineProvider(ViewOutlineProviderImpl.boundsWithPaddingRoundRect(0, dp(16)));
+                addView(messagesCellPreview, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL, 12, 0, 12, 0));
+            }
+
+            giftTabsView = new Tabs(getContext(), resourceProvider);
+            //giftTabsView.backgroundDrawableGlass = glassBackgroundDrawableFactory.create(giftTabsView)
+            //    .setColorProvider(BlurredBackgroundProviderImpl.tabsPanelNoShadow(resourceProvider))
+            //    .setRadius(dp(18))
+            //    .setHasPadding(true);
+            giftTabsView.backgroundDrawableGlass =
+            giftTabsView.backgroundDrawableNoGlass = iBlur3ButtonFactory.create(giftTabsView)
+                    .setColorProvider(BlurredBackgroundProviderImpl.tabsPanelNoShadow(resourceProvider))
+                    .setRadius(dp(18))
+                    .setHasPadding(true);
+
+            giftTabsView.setExternalInvalidate(() -> {
+                if (drawGiftTabsInList) {
+                    listView.invalidate();
+                }
+            });
+            giftTabsView.setVisibility(View.INVISIBLE);
+            addView(giftTabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 36, Gravity.TOP | Gravity.FILL_HORIZONTAL, 12, 0, 12, 0));
+
+            if (profilePreview != null) {
                 addView(profilePreview, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL));
             }
 
@@ -413,24 +825,75 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             setWillNotDraw(false);
         }
 
-        private int actionBarHeight;
+        public class EmptyView extends LinearLayout implements Theme.Colorable {
 
-        @Override
-        protected void dispatchDraw(Canvas canvas) {
-            super.dispatchDraw(canvas);
-            if (getParentLayout() != null) {
-                getParentLayout().drawHeaderShadow(canvas, actionBarHeight);
+            private final BackupImageView imageView;
+            private final TextView title;
+            private final TextView subtitle;
+
+            public EmptyView(Context context) {
+                super(context);
+
+                setOrientation(LinearLayout.VERTICAL);
+                ThemeBind.backgroundColor(this, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
+
+                imageView = new BackupImageView(getContext());
+                imageView.setImageDrawable(new RLottieDrawable(R.raw.utyan_draw, dp(120), dp(120)));
+                addView(imageView, LayoutHelper.createLinear(120, 120, Gravity.CENTER_HORIZONTAL, 0, 6, 0, 0));
+
+                title = TextHelper.makeLinkTextView(getContext(), 14, Theme.key_windowBackgroundWhiteGrayText, false, resourceProvider);
+                title.setGravity(Gravity.CENTER);
+                title.setText(getString(type == PAGE_PROFILE ? R.string.Gift2PeerColorProfileEmptyTitle : R.string.Gift2PeerColorReplyEmptyTitle));
+                addView(title, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 64, 8, 64, 8));
+
+                subtitle = TextHelper.makeLinkTextView(getContext(), 14, Theme.key_chat_messageLinkIn, false, resourceProvider);
+                subtitle.setGravity(Gravity.CENTER);
+                subtitle.setText(AndroidUtilities.replaceArrows(AndroidUtilities.replaceSingleTag(getString(R.string.Gift2PeerColorEmptyButton), () -> {
+                    if (giftTabsView != null && Page.this.tabs.size() > 1) {
+                        giftTabsView.setSelected(1, true);
+                        selectedTabGift = index2gift.get(1);
+                        if (selectedTabGift == null) {
+                            if (resaleGifts != null) {
+                                resaleGifts.cancel();
+                                resaleGifts = null;
+                            }
+                        } else if (resaleGifts == null || resaleGifts.gift_id != selectedTabGift.id) {
+                            resaleGifts = new ResaleGiftsFragment.ResaleGiftsList(currentAccount, selectedTabGift.id, first -> update());
+                            resaleGifts.load();
+                        }
+                        updateAfterGiftTabSelected();
+                        final Page otherPage = viewPager.getCurrentPosition() == PAGE_NAME ? profilePage : namePage;
+                        otherPage.update();
+                    }
+                }), true, dp(8f / 3f), dp(1.33f), 1.0f));
+                addView(subtitle, LayoutHelper.createLinear(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL, 32, 4, 32, 24));
+            }
+
+            @Override
+            public void updateColors() {
+                setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                title.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteGrayText));
+                subtitle.setTextColor(getThemedColor(Theme.key_chat_messageLinkIn));
+                subtitle.setLinkTextColor(getThemedColor(Theme.key_chat_messageLinkIn));
             }
         }
+
+        private int actionBarHeight;
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
             if (type == PAGE_NAME) {
-                actionBarHeight = ActionBar.getCurrentActionBarHeight() + AndroidUtilities.statusBarHeight;
-                ((MarginLayoutParams) listView.getLayoutParams()).topMargin = actionBarHeight;
+                super.onMeasure(widthMeasureSpec, heightMeasureSpec);
+                actionBarHeight = messagesCellPreview.getMeasuredHeight() + ActionBar.getCurrentActionBarHeight() + AndroidUtilities.statusBarHeight;
+                ((MarginLayoutParams) messagesCellPreview.getLayoutParams()).topMargin = ActionBar.getCurrentActionBarHeight() + AndroidUtilities.statusBarHeight;
+                ((MarginLayoutParams) listView.getLayoutParams()).topMargin = actionBarHeight - dp(16);
+                ((MarginLayoutParams) messagesCellFade.getLayoutParams()).topMargin = actionBarHeight - dp(64);
+                ((MarginLayoutParams) messagesCellFade2.getLayoutParams()).topMargin = actionBarHeight - dp(16);
+                listView.setPadding(listView.getPaddingLeft(), dp(16), listView.getPaddingRight(), listView.getPaddingBottom());
             } else {
-                actionBarHeight = dp(144) + AndroidUtilities.statusBarHeight;
+                actionBarHeight = dp(230) + AndroidUtilities.statusBarHeight;
                 ((MarginLayoutParams) listView.getLayoutParams()).topMargin = actionBarHeight;
+                ((MarginLayoutParams) messagesCellFade.getLayoutParams()).topMargin = actionBarHeight - dp(64);
                 ((MarginLayoutParams) profilePreview.getLayoutParams()).height = actionBarHeight;
             }
             super.onMeasure(widthMeasureSpec, heightMeasureSpec);
@@ -441,46 +904,28 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 final TLRPC.Chat chat = getMessagesController().getChat(-dialogId);
                 if (chat == null) return false;
                 if (type == PAGE_NAME) {
-                    return !(selectedColor == ChatObject.getColorId(chat) && selectedEmoji == ChatObject.getEmojiId(chat));
+                    return !(selectedColor == ChatObject.getColorId(chat) && selectedEmoji == ChatObject.getEmojiId(chat) && eq(chat != null && chat.color instanceof TLRPC.TL_peerColorCollectible ? (TLRPC.TL_peerColorCollectible) chat.color : null, selectedPeerCollectible));
                 } else {
-                    return !(selectedColor == ChatObject.getProfileColorId(chat) && selectedEmoji == ChatObject.getProfileEmojiId(chat));
+                    return !(selectedColor == (chat != null && chat.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? -1 : ChatObject.getProfileColorId(chat)) && selectedEmoji == (chat != null && chat.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? 0 : ChatObject.getOnlyProfileEmojiId(chat)) && eq(chat == null ? null : chat.emoji_status, selectedEmojiCollectible));
                 }
             } else {
                 final TLRPC.User me = getUserConfig().getCurrentUser();
                 if (me == null) return false;
                 if (type == PAGE_NAME) {
-                    return !(selectedColor == UserObject.getColorId(me) && selectedEmoji == UserObject.getEmojiId(me));
+                    final boolean a = selectedColor == (me.color instanceof TLRPC.TL_peerColorCollectible ? -1 : UserObject.getColorId(me));
+                    final boolean b = selectedEmoji == UserObject.getEmojiId(me);
+                    final boolean c = eq(me.color instanceof TLRPC.TL_peerColorCollectible ? (TLRPC.TL_peerColorCollectible) me.color : null, selectedPeerCollectible);
+                    return !(a && b && c);
                 } else {
-                    return !(selectedColor == UserObject.getProfileColorId(me) && selectedEmoji == UserObject.getProfileEmojiId(me));
+                    final boolean a = selectedColor == (me.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? -1 : UserObject.getProfileColorId(me));
+                    final boolean b = selectedEmoji == (me.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? 0 : UserObject.getOnlyProfileEmojiId(me));
+                    final boolean c = eq(me.emoji_status instanceof TLRPC.TL_emojiStatusCollectible ? (TLRPC.TL_emojiStatusCollectible) me.emoji_status : null , selectedEmojiCollectible);
+                    return !(a && b && c);
                 }
             }
         }
 
-        private void updateButtonY() {
-            if (buttonContainer == null) {
-                return;
-            }
-            final int lastPosition = listAdapter.getItemCount() - 1;
-            boolean foundLastPosition = false;
-            int maxTop = 0;
-            for (int i = 0; i < listView.getChildCount(); ++i) {
-                View child = listView.getChildAt(i);
-                final int position = listView.getChildAdapterPosition(child);
-                if (position != RecyclerListView.NO_POSITION && position <= lastPosition) {
-                    maxTop = Math.max(maxTop, child.getTop());
-                    if (position == lastPosition) {
-                        foundLastPosition = true;
-                    }
-                }
-            }
-            if (!foundLastPosition) {
-                maxTop = listView.getMeasuredHeight();
-            }
-            buttonContainer.setTranslationY(Math.max(0, maxTop - (listView.getMeasuredHeight() - dp(14 + 48 + 14))));
-        }
-
-
-        private class SetReplyIconCell extends FrameLayout {
+        private class SetReplyIconCell extends FrameLayout implements Theme.Colorable {
 
             private TextView textView;
             private Text offText;
@@ -489,22 +934,24 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             public SetReplyIconCell(Context context) {
                 super(context);
 
-                setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                ThemeBind.backgroundColor(this, Theme.key_windowBackgroundWhite, PeerColorActivity.this.getResourceProvider());
 
                 textView = new TextView(context);
                 textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 16);
-                textView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
+                ThemeBind.textColor(textView, Theme.key_windowBackgroundWhiteBlackText, PeerColorActivity.this.getResourceProvider());
                 if (type == PAGE_NAME) {
-                    textView.setText(LocaleController.getString(isChannel ? R.string.ChannelReplyIcon : R.string.UserReplyIcon));
+                    textView.setText(getString(isChannel ? R.string.ChannelReplyIcon : R.string.UserReplyIcon));
                 } else {
-                    textView.setText(LocaleController.getString(isChannel ? R.string.ChannelProfileIcon : R.string.UserProfileIcon));
+                    textView.setText(getString(isChannel ? R.string.ChannelProfileIcon : R.string.UserProfileIcon));
                 }
                 addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL | Gravity.FILL_HORIZONTAL, 20, 0, 20, 0));
 
                 imageDrawable = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(this, false, dp(24), AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW_STATIC);
             }
 
+            @Override
             public void updateColors() {
+                setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
                 textView.setTextColor(getThemedColor(Theme.key_windowBackgroundWhiteBlackText));
             }
 
@@ -515,17 +962,17 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 } else {
                     imageDrawable.set((Drawable) null, animated);
                     if (offText == null) {
-                        offText = new Text(LocaleController.getString(isChannel ? R.string.ChannelReplyIconOff : R.string.UserReplyIconOff), 16);
+                        offText = new Text(getString(isChannel ? R.string.ChannelReplyIconOff : R.string.UserReplyIconOff), 16);
                     }
                 }
             }
 
             public void updateImageBounds() {
                 imageDrawable.setBounds(
-                    LocaleController.isRTL ? dp(21) : getWidth() - imageDrawable.getIntrinsicWidth() - dp(21),
-                    (getHeight() - imageDrawable.getIntrinsicHeight()) / 2,
-                    LocaleController.isRTL ? dp(21) + imageDrawable.getIntrinsicWidth() : getWidth() - dp(21),
-                    (getHeight() + imageDrawable.getIntrinsicHeight()) / 2
+                        LocaleController.isRTL ? dp(21) : getWidth() - imageDrawable.getIntrinsicWidth() - dp(21),
+                        (getHeight() - imageDrawable.getIntrinsicHeight()) / 2,
+                        LocaleController.isRTL ? dp(21) + imageDrawable.getIntrinsicWidth() : getWidth() - dp(21),
+                        (getHeight() + imageDrawable.getIntrinsicHeight()) / 2
                 );
             }
 
@@ -609,20 +1056,35 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     } else {
                         yoff = -(cell.getHeight() - AndroidUtilities.rectTmp2.centerY()) - AndroidUtilities.dp(16);
                     }
-                    xoff = AndroidUtilities.rectTmp2.centerX() - (AndroidUtilities.displaySize.x - popupWidth);
+                    xoff = AndroidUtilities.rectTmp2.centerX() - (AndroidUtilities.displaySize.x - popupWidth) + dp(12);
                 }
             }
             SelectAnimatedEmojiDialog popupLayout = new SelectAnimatedEmojiDialog(PeerColorActivity.this, getContext(), true, xoff, type == PAGE_NAME ? SelectAnimatedEmojiDialog.TYPE_SET_REPLY_ICON : SelectAnimatedEmojiDialog.TYPE_SET_REPLY_ICON_BOTTOM, true, getResourceProvider(), type == PAGE_NAME ? 24 : 16, cell.getColor()) {
                 @Override
-                protected void onEmojiSelected(View emojiView, Long documentId, TLRPC.Document document, Integer until) {
-                    selectedEmoji = documentId == null ? 0 : documentId;
+                protected void onEmojiSelected(View emojiView, Long documentId, TLRPC.Document document, TL_stars.TL_starGiftUnique gift, Integer until) {
+                    if (gift != null) {
+                        if (type == PAGE_PROFILE) {
+                            if (!(gift.peer_color instanceof TLRPC.TL_peerColorCollectible)) return;
+                            selectedPeerCollectible = (TLRPC.TL_peerColorCollectible) gift.peer_color;
+                            selectedEmojiCollectible = null;
+                        } else {
+                            selectedPeerCollectible = null;
+                            selectedEmojiCollectible = MessagesController.emojiStatusCollectibleFromGift(gift);
+                        }
+                        selectedResaleGift = null;
+                        selectedColor = -1;
+                    } else {
+                        selectedEmoji = documentId == null ? 0 : documentId;
+                        selectedEmojiCollectible = null;
+                        selectedPeerCollectible = null;
+                        selectedResaleGift = null;
+                    }
                     if (cell != null) {
                         cell.update(true);
                     }
-                    if (profilePreview != null) {
-                        profilePreview.setEmoji(selectedEmoji, true);
-                    }
+                    updateProfilePreview(true);
                     updateMessages();
+                    updateButton(true);
                     if (popup[0] != null) {
                         selectAnimatedEmojiDialog = null;
                         popup[0].dismiss();
@@ -662,22 +1124,170 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             }
         }
 
-        private void updateRows() {
-            rowCount = 0;
-            if (type == PAGE_NAME) {
-                previewRow = rowCount++;
+        public void updateSelectedGift() {
+            for (int i = 0; i < listView.getChildCount(); ++i) {
+                final View child = listView.getChildAt(i);
+                if (child instanceof GiftCell) {
+                    final GiftCell cell = (GiftCell) child;
+                    cell.setSelected(
+                            selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == cell.getGiftId() ||
+                                    selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == cell.getGiftId(),
+                            true
+                    );
+                } else if (child instanceof GiftSheet.GiftCell) {
+                    final GiftSheet.GiftCell cell = (GiftSheet.GiftCell) child;
+                    cell.setSelected(
+                            selectedEmojiCollectible != null && selectedEmojiCollectible.collectible_id == cell.getGiftId() ||
+                                    selectedPeerCollectible != null && selectedPeerCollectible.collectible_id == cell.getGiftId(),
+                            true
+                    );
+                }
             }
+        }
+
+        private void updateRows() {
+            clearRow = -1;
+            shadowRow = -1;
+            giftsHeaderRow = -1;
+            giftsStartRow = -1;
+            giftsLoadingStartRow = -1;
+            giftsLoadingEndRow = -1;
+            giftsEndRow = -1;
+            giftsInfoRow = -1;
+            giftsTabsRow = -1;
+            giftsEmptyRow = -1;
+            giftsEmptyRowGap = -1;
+            giftsCount = 0;
+            uniqueGifts.clear();
+
+            rowCount = 0;
             colorPickerRow = rowCount++;
             iconRow = rowCount++;
             infoRow = rowCount++;
-            if (type == PAGE_PROFILE && selectedColor >= 0) {
+            if ((type == PAGE_PROFILE) && (selectedColor >= 0 || selectedEmojiCollectible != null || selectedPeerCollectible != null)) {
                 clearRow = rowCount++;
                 shadowRow = rowCount++;
-            } else {
-                clearRow = -1;
-                shadowRow = -1;
+            }
+            final StarsController.GiftsList giftsList = type == PAGE_NAME ? giftsWithPeerColor : gifts;
+            if ((type == PAGE_PROFILE || type == PAGE_NAME) && giftsList != null) {
+                giftsTabsRow = rowCount++;
+                if (selectedTabGift == null) {
+                    for (int i = 0; i < giftsList.gifts.size(); ++i) {
+                        TL_stars.SavedStarGift savedGift = giftsList.gifts.get(i);
+                        if (savedGift.gift instanceof TL_stars.TL_starGiftUnique) {
+                            uniqueGifts.add((TL_stars.TL_starGiftUnique) savedGift.gift);
+                        }
+                    }
+                    giftsStartRow = rowCount;
+                    rowCount += uniqueGifts.size();
+                    giftsCount += uniqueGifts.size();
+                    giftsEndRow = rowCount;
+                    if (gifts.loading || !gifts.endReached) {
+                        giftsLoadingStartRow = rowCount;
+                        final int spanCountLeft = 3 - (giftsCount % 3);
+                        final int loadingCells = giftsCount <= 0 ? 9 : spanCountLeft <= 0 ? 3 : spanCountLeft;
+                        rowCount += loadingCells;
+                        giftsCount += loadingCells;
+                        giftsLoadingEndRow = rowCount;
+                    } else if (uniqueGifts.isEmpty()) {
+                        giftsEmptyRowGap = rowCount++;
+                        giftsEmptyRow = rowCount++;
+                    }
+                    if (giftsList != null && seesLoading()) {
+                        giftsList.load();
+                    }
+                } else if (selectedTabGift != null && resaleGifts != null) {
+                    final long selfId = UserConfig.getInstance(currentAccount).getClientUserId();
+                    for (int i = 0; i < resaleGifts.gifts.size(); ++i) {
+                        TL_stars.TL_starGiftUnique g = resaleGifts.gifts.get(i);
+                        if (DialogObject.getPeerDialogId(g.owner_id) != selfId && DialogObject.getPeerDialogId(g.host_id) != selfId) {
+                            uniqueGifts.add(g);
+                        }
+                    }
+                    giftsStartRow = rowCount;
+                    rowCount += uniqueGifts.size();
+                    giftsCount += uniqueGifts.size();
+                    giftsEndRow = rowCount;
+                    if (resaleGifts.loading || !resaleGifts.endReached) {
+                        giftsLoadingStartRow = rowCount;
+                        final int spanCountLeft = 3 - (giftsCount % 3);
+                        final int loadingCells = giftsCount <= 0 ? 9 : spanCountLeft <= 0 ? 3 : spanCountLeft;
+                        rowCount += loadingCells;
+                        giftsCount += loadingCells;
+                        giftsLoadingEndRow = rowCount;
+                    }
+                    if (resaleGifts != null && seesLoading()) {
+                        resaleGifts.load();
+                    }
+                }
+                giftsInfoRow = rowCount++;
             }
             buttonRow = rowCount++;
+            if (giftTabsView != null) {
+                giftTabsView.post(this::updateGiftTabsPosition);
+            }
+        }
+
+        public boolean seesLoading() {
+            if (listView == null) return false;
+            for (int i = 0; i < listView.getChildCount(); ++i) {
+                View child = listView.getChildAt(i);
+                if (child instanceof FlickerLoadingView) {
+                    return true;
+                }
+            }
+            return false;
+        }
+
+        public void updateButton(boolean animated) {
+            if (selectedResaleGift != null) {
+                final TL_stars.TL_starGiftUnique gift = selectedResaleGift;
+                final AmountUtils.Amount stars = gift.getResellAmount(AmountUtils.Currency.STARS);
+                if (gift.resale_ton_only) {
+                    final AmountUtils.Amount ton = gift.getResellAmount(AmountUtils.Currency.TON);
+                    buttonState.text = StarsIntroActivity.whiteGram(true, StarsIntroActivity.replaceStars(true, LocaleController.formatString(R.string.ResellGiftBuyTON, ton.asFormatString())));
+                    buttonState.subText = StarsIntroActivity.replaceStars(formatPluralStringComma("ResellGiftBuyEq", (int) stars.asDecimal()));
+                } else {
+                    buttonState.text = StarsIntroActivity.replaceStars(formatPluralStringComma("ResellGiftBuy", (int) stars.asDecimal()));
+                    buttonState.subText = null;
+                }
+            } else {
+                buttonState.text = !getUserConfig().isPremium() && !isChannel ? buttonLocked : (selectedEmojiCollectible != null ? buttonCollectible : buttonUnlocked);
+                buttonState.subText = null;
+            }
+            if (getButtonPage() == this) {
+                applyButtonState(this, animated);
+            }
+        }
+
+        public void updateProfilePreview(boolean animated) {
+            if (peerColorPicker != null) {
+                peerColorPicker.setSelected(selectedColor, animated);
+            }
+            if (profilePreview != null) {
+                if (selectedEmojiCollectible != null) {
+                    profilePreview.setStatusEmoji(selectedEmojiCollectible.document_id, true, animated);
+                    profilePreview.setColor(MessagesController.PeerColor.fromCollectible(selectedEmojiCollectible), animated);
+                    profilePreview.setEmoji(selectedEmojiCollectible.pattern_document_id, true, animated);
+                } else {
+                    if (DialogObject.isEmojiStatusCollectible(dialogId)) {
+                        profilePreview.setStatusEmoji(0, false, animated);
+                    } else {
+                        profilePreview.setStatusEmoji(DialogObject.getEmojiStatusDocumentId(dialogId), DialogObject.isEmojiStatusCollectible(dialogId), animated);
+                    }
+                    profilePreview.setColor(selectedColor, animated);
+                    profilePreview.setEmoji(selectedEmoji, false, animated);
+                }
+            }
+            if (type == PAGE_PROFILE && colorBar != null) {
+                if (selectedEmojiCollectible != null) {
+                    colorBar.setColor(MessagesController.PeerColor.fromCollectible(selectedEmojiCollectible), animated);
+                } else {
+                    colorBar.setColor(currentAccount, selectedColor, animated);
+                }
+            }
+            checkResetColorButton();
+            updateSelectedGift();
         }
 
         private void updateMessages() {
@@ -687,10 +1297,12 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     if (cells[i] != null) {
                         MessageObject msg = cells[i].getMessageObject();
                         if (msg != null) {
+                            msg.notime = true;
                             if (peerColorPicker != null) {
                                 msg.overrideLinkColor = peerColorPicker.getColorId();
                             }
                             msg.overrideLinkEmoji = selectedEmoji;
+                            msg.overrideLinkPeerColor = selectedPeerCollectible;
                             cells[i].setAvatar(msg);
                             cells[i].invalidate();
                         }
@@ -699,21 +1311,31 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             }
         }
 
-        public void updateColors() {
-            listView.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundGray));
-            if (type == PAGE_PROFILE && colorBar != null) {
-                colorBar.setColor(currentAccount, selectedColor, true);
+        public void update() {
+            updateRows();
+            listAdapter.notifyDataSetChanged();
+        }
+
+        private void updateAfterGiftTabSelected() {
+            final boolean keepTabsPinned = giftTabsPinned;
+            if (keepTabsPinned) {
+                listView.stopScroll();
             }
+            update();
+            if (keepTabsPinned && giftsTabsRow >= 0) {
+                layoutManager.scrollToPositionWithOffset(giftsTabsRow, tabsPinOffset);
+                listView.post(this::updateGiftTabsPosition);
+            }
+        }
+
+        public void updateColors() {
             if (button != null) {
                 button.updateColors();
             }
             if (messagesCellPreview != null) {
                 messagesCellPreview.invalidate();
             }
-            if (profilePreview != null) {
-                profilePreview.setColor(selectedColor, false);
-            }
-            buttonContainer.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundGray));
+            updateProfilePreview(true);
             AndroidUtilities.forEachViews(listView, view -> {
                 if (view instanceof PeerColorGrid) {
                     view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
@@ -724,20 +1346,89 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 } else if (view instanceof SetReplyIconCell) {
                     view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
                     ((SetReplyIconCell) view).updateColors();
+                } else if (view instanceof HeaderCell) {
+                    view.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundWhite));
+                } else if (view instanceof GiftCell) {
+                    ((GiftCell) view).card.invalidate();
+                } else if (view instanceof Tabs) {
+                    updateTabsColors((Tabs) view);
+                } else if (view instanceof EmptyView) {
+                    ((EmptyView) view).updateColors();
                 }
             });
+            if (giftTabsView != null) {
+                updateTabsColors(giftTabsView);
+            }
+        }
+
+        private void updateTabsColors(Tabs tabsView) {
+            tabsView.setColors(
+                    getThemedColor(Theme.key_windowBackgroundWhite),
+                    getThemedColor(Theme.key_windowBackgroundGray),
+                    getThemedColor(Theme.key_windowBackgroundWhiteGrayText2),
+                    getThemedColor(Theme.key_windowBackgroundWhiteBlackText)
+            );
         }
 
         public void premiumChanged() {
-            if (button != null && !isChannel) {
-                button.setText(!getUserConfig().isPremium() ? buttonLocked : buttonUnlocked, true);
+            updateButton(true);
+        }
+
+        private void updateGiftTabsPosition() {
+            if (giftTabsView == null || giftsTabsRow < 0) {
+                drawGiftTabsInList = false;
+                giftTabsPinned = false;
+                if (messagesCellFade != null) {
+                    messagesCellFade.setTranslationY(0);
+                }
+                if (giftTabsView != null) {
+                    giftTabsView.setVisibility(View.INVISIBLE);
+                    giftTabsView.setDrawInList(drawGiftTabsInList);
+                }
+                return;
             }
+
+            giftTabsPlaceholder = layoutManager.findViewByPosition(giftsTabsRow);
+            final int pinTop = listView.getPaddingTop() + tabsPinOffset;
+            final int firstVisiblePosition = layoutManager.findFirstVisibleItemPosition();
+
+            if (giftTabsPlaceholder != null) {
+                giftTabsPinned = giftTabsPlaceholder.getTop() <= pinTop;
+                drawGiftTabsInList = !giftTabsPinned;
+                giftTabsView.setVisibility(View.VISIBLE);
+                final int top = listView.getTop() + Math.max(giftTabsPlaceholder.getTop(), pinTop);
+                giftTabsView.setTranslationY(top - giftTabsView.getTop());
+            } else if (firstVisiblePosition != RecyclerView.NO_POSITION && firstVisiblePosition > giftsTabsRow) {
+                giftTabsPinned = true;
+                drawGiftTabsInList = false;
+                giftTabsView.setVisibility(View.VISIBLE);
+                final int top = listView.getTop() + pinTop;
+                giftTabsView.setTranslationY(top - giftTabsView.getTop());
+            } else {
+                giftTabsPinned = false;
+                drawGiftTabsInList = false;
+                giftTabsView.setVisibility(View.VISIBLE);
+                giftTabsView.setTranslationY(getHeight() + dp(1) - giftTabsView.getTop());
+            }
+            giftTabsView.setDrawInList(drawGiftTabsInList);
+            messagesCellFade.setTranslationY(giftTabsPinned ? dp(36) + tabsPinOffset : 0);
+
+            listView.invalidate();
+            invalidate();
+        }
+
+        @Override
+        protected boolean drawChild(@NonNull Canvas canvas, View child, long drawingTime) {
+            if (child == giftTabsView && !giftTabsPinned) {
+                return false;
+            }
+            return super.drawChild(canvas, child, drawingTime);
         }
     }
 
     private Theme.ResourcesProvider parentResourcesProvider;
     private final SparseIntArray currentColors = new SparseIntArray();
-    private final Theme.MessageDrawable msgInDrawable, msgInDrawableSelected;
+    private final MessageDrawable msgInDrawable, msgInDrawableSelected;
 
     public void updateThemeColors() {
         SharedPreferences preferences = ApplicationLoader.applicationContext.getSharedPreferences("themeconfig", Activity.MODE_PRIVATE);
@@ -792,11 +1483,42 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         }
     }
 
+    private final GlassSourceColor iBlur3SourceButtonColor;
+    private final BlurredBackgroundDrawableViewFactory iBlur3ButtonFactory;
+
+    private final GlassSourceColor iBlur3SourceBackgroundColor;
+    private final BlurredBackgroundDrawableViewFactory iBlur3BackgroundFactory;
+
     public PeerColorActivity(long dialogId) {
         super();
 
+        iBlur3SourceButtonColor = new GlassSourceColor();
+        iBlur3ButtonFactory = new BlurredBackgroundDrawableViewFactory(iBlur3SourceButtonColor);
+        iBlur3SourceBackgroundColor = new GlassSourceColor();
+        iBlur3BackgroundFactory = new BlurredBackgroundDrawableViewFactory(iBlur3SourceBackgroundColor);
+
+        iBlur3ButtonFactory.setLinkedViewsRef(glassAttachedViews);
+        iBlur3ButtonFactory.setLinkedDrawablesRef(glassAttachedDrawables);
+        iBlur3BackgroundFactory.setLinkedViewsRef(glassAttachedViews);
+        iBlur3BackgroundFactory.setLinkedDrawablesRef(glassAttachedDrawables);
+
         this.dialogId = dialogId;
         this.isChannel = dialogId != 0;
+        if (dialogId >= 0) {
+            StarsController.getInstance(currentAccount).loadStarGifts();
+
+            this.gifts = new StarsController.GiftsList(currentAccount, dialogId, false);
+            this.gifts.forceTypeIncludeFlag(StarsController.GiftsList.INCLUDE_TYPE_UNIQUE_FLAG, false);
+            this.gifts.load();
+
+            this.giftsWithPeerColor = new StarsController.GiftsList(currentAccount, dialogId, false);
+            this.giftsWithPeerColor.forceTypeIncludeFlag(StarsController.GiftsList.INCLUDE_TYPE_UNIQUE_FLAG, false);
+            this.giftsWithPeerColor.peer_color_available = true;
+            this.giftsWithPeerColor.load();
+        } else {
+            this.gifts = null;
+            this.giftsWithPeerColor = null;
+        }
 
         resourceProvider = new Theme.ResourcesProvider() {
             @Override
@@ -835,8 +1557,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 return isDark;
             }
         };
-        msgInDrawable = new Theme.MessageDrawable(Theme.MessageDrawable.TYPE_TEXT, false, false, resourceProvider);
-        msgInDrawableSelected = new Theme.MessageDrawable(Theme.MessageDrawable.TYPE_TEXT, false, true, resourceProvider);
+        msgInDrawable = new MessageDrawable(MessageDrawable.TYPE_TEXT, false, false, resourceProvider);
+        msgInDrawableSelected = new MessageDrawable(MessageDrawable.TYPE_TEXT, false, true, resourceProvider);
     }
 
     @Override
@@ -858,7 +1580,9 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
     @Override
     public boolean onFragmentCreate() {
-        getNotificationCenter().addObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.starUserGiftsLoaded);
+        getNotificationCenter().addWeakObserver(this, NotificationCenter.starGiftsLoaded);
         Bulletin.addDelegate(this, new Bulletin.Delegate() {
             @Override
             public int getBottomOffset(int tag) {
@@ -885,16 +1609,19 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
     private FrameLayout actionBarContainer;
     private FilledTabsView tabsView;
     private SimpleTextView titleView;
+    private FrameLayout buttonContainerInternal;
+    private FrameLayout buttonContainer;
+    private ButtonWithCounterView button;
+    private Page buttonPage;
 
     @Override
     public View createView(Context context) {
-
-        namePage = new Page(context, PAGE_NAME);
-        profilePage = new Page(context, PAGE_PROFILE);
+        setHasOwnBackground(true);
 
         actionBar.setCastShadows(false);
         actionBar.setVisibility(View.GONE);
         actionBar.setAllowOverlayTitle(false);
+        actionBar.setAddToContainer(false);
 
         FrameLayout frameLayout = new FrameLayout(context) {
             @Override
@@ -906,16 +1633,17 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 super.onMeasure(widthMeasureSpec, heightMeasureSpec);
             }
         };
-        frameLayout.setFitsSystemWindows(true);
+        fragmentView = contentView = frameLayout;
+        namePage = new Page(context, PAGE_NAME);
+        profilePage = new Page(context, PAGE_PROFILE);
 
         colorBar = new ColoredActionBar(context, resourceProvider) {
             @Override
             protected void onUpdateColor() {
                 updateLightStatusBar();
                 updateActionBarButtonsColor();
-                if (tabsView != null) {
-                    tabsView.setBackgroundColor(getTabsViewBackgroundColor());
-                }
+                updateTabColors();
+                checkPagesColors();
             }
 
             private int lastBtnColor = 0;
@@ -933,16 +1661,18 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 }
             }
         };
-        if (profilePage != null) {
-            colorBar.setColor(currentAccount, profilePage.selectedColor, false);
-        }
-        frameLayout.addView(colorBar, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL));
+        colorBar.newMode = true;
+        profilePage.updateProfilePreview(false);
+        profilePage.addView(colorBar, 2, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL));
 
         viewPager = new ViewPagerFixed(context) {
             @Override
-            protected void onTabAnimationUpdate(boolean manual) {
-                tabsView.setSelected(viewPager.getPositionAnimated());
-                colorBar.setProgressToGradient(viewPager.getPositionAnimated());
+            public void onTabAnimationUpdate(boolean manual) {
+                final float position = viewPager.getPositionAnimated();
+                tabsView.setSelected(position);
+                colorBar.setProgressToGradient(1 - getTabProgressFromPageProgress(position));
+                updateTabColors();
+                updateButtonState(true);
             }
         };
         viewPager.setAdapter(new ViewPagerFixed.Adapter() {
@@ -969,6 +1699,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             }
         });
         frameLayout.addView(viewPager, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
+        createButton(context);
+        frameLayout.addView(buttonContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.BOTTOM));
 
         actionBarContainer = new FrameLayout(context);
         frameLayout.addView(actionBarContainer, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.TOP | Gravity.FILL_HORIZONTAL));
@@ -976,49 +1708,46 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         if (!isChannel) {
             tabsView = new FilledTabsView(context);
             tabsView.setTabs(
-                    LocaleController.getString(isChannel ? R.string.ChannelColorTabName : R.string.UserColorTabName),
-                    LocaleController.getString(isChannel ? R.string.ChannelColorTabProfile : R.string.UserColorTabProfile)
+                    getString(isChannel ? R.string.ChannelColorTabProfile : R.string.UserColorTabProfile),
+                    getString(isChannel ? R.string.ChannelColorTabName : R.string.UserColorTabName)
             );
             tabsView.onTabSelected(tab -> {
                 if (viewPager != null) {
                     viewPager.scrollToPosition(tab);
                 }
             });
+            updateTabColors();
             actionBarContainer.addView(tabsView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 40, Gravity.CENTER));
         } else {
             titleView = new SimpleTextView(context);
-            titleView.setText(LocaleController.getString(R.string.ChannelColorTitle2));
+            titleView.setText(getString(R.string.ChannelColorTitle2));
             titleView.setEllipsizeByGradient(true);
             titleView.setTextSize(20);
-            titleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
-            titleView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+            ThemeBind.textColor(titleView, Theme.key_actionBarDefaultTitle, getResourceProvider());
+            titleView.setTypeface(AndroidUtilities.bold());
             actionBarContainer.addView(titleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_VERTICAL | Gravity.LEFT, 72, 0, 72, 0));
         }
 
-        if (startAtProfile) {
-            viewPager.setPosition(1);
-            if (tabsView != null) {
-                tabsView.setSelected(1);
-            }
-            if (colorBar != null) {
-                colorBar.setProgressToGradient(1f);
-                updateLightStatusBar();
-            }
+        if (colorBar != null) {
+            colorBar.setProgressToGradient(1f);
+            updateLightStatusBar();
         }
 
         backButton = new ImageView(context);
         backButton.setScaleType(ImageView.ScaleType.CENTER);
-        backButton.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarWhiteSelector), Theme.RIPPLE_MASK_CIRCLE_20DP));
+        ThemeBind.selectorBackground(backButton, Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarWhiteSelector), Theme.RIPPLE_MASK_CIRCLE_20DP), null, ThemeBind.of(Theme.key_actionBarWhiteSelector), getResourceProvider());
         backButton.setImageResource(R.drawable.ic_ab_back);
         backButton.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
         backButton.setOnClickListener(v -> {
-            if (onBackPressed()) {
+            if (onBackPressed(true)) {
                 finishFragment();
             }
         });
+        ScaleStateListAnimator.apply(backButton);
+
         actionBarContainer.addView(backButton, LayoutHelper.createFrame(54, 54, Gravity.LEFT | Gravity.CENTER_VERTICAL));
 
-        sunDrawable = new RLottieDrawable(R.raw.sun, "" + R.raw.sun, dp(28), dp(28), true, null);
+        sunDrawable = new RLottieDrawable(R.raw.sun_outline, dp(28), dp(28), true, null);
         sunDrawable.setPlayInDirectionOfCustomEndFrame(true);
         if (!isDark) {
             sunDrawable.setCustomEndFrame(0);
@@ -1029,15 +1758,15 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         }
         sunDrawable.beginApplyLayerColors();
         int color = Theme.getColor(Theme.key_chats_menuName);
-        sunDrawable.setLayerColor("Sunny.**", color);
-        sunDrawable.setLayerColor("Path 6.**", color);
-        sunDrawable.setLayerColor("Path.**", color);
-        sunDrawable.setLayerColor("Path 5.**", color);
+        sunDrawable.setLayerColor("Sunny", color);
+        sunDrawable.setLayerColor("Path 6", color);
+        sunDrawable.setLayerColor("Path", color);
+        sunDrawable.setLayerColor("Path 5", color);
         sunDrawable.commitApplyLayerColors();
 
         dayNightItem = new ImageView(context);
         dayNightItem.setScaleType(ImageView.ScaleType.CENTER);
-        dayNightItem.setBackground(Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarWhiteSelector), Theme.RIPPLE_MASK_CIRCLE_20DP));
+        ThemeBind.selectorBackground(dayNightItem, Theme.createSelectorDrawable(getThemedColor(Theme.key_actionBarWhiteSelector), Theme.RIPPLE_MASK_CIRCLE_20DP), null, ThemeBind.of(Theme.key_actionBarWhiteSelector), getResourceProvider());
         dayNightItem.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
         dayNightItem.setOnClickListener(v -> {
             toggleTheme();
@@ -1047,9 +1776,55 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
         colorBar.updateColors();
 
-        fragmentView = contentView = frameLayout;
+        checkColors();
+        checkPagesColors();
 
+        ViewCompat.setOnApplyWindowInsetsListener(fragmentView, this::onApplyWindowInsets);
         return contentView;
+    }
+
+    private void createButton(Context context) {
+        button = new ButtonWithCounterView(context, getResourceProvider());
+        button.setStateListAnimator(null);
+        button.setRound();
+        button.text.setHacks(true, true, true);
+
+        buttonContainerInternal = new FrameLayout(context);
+        buttonContainerInternal.setOnClickListener(v -> buttonClick());
+        buttonContainerInternal.setPadding(dp(8), dp(8), dp(8), dp(8));
+        buttonContainerInternal.addView(button, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT));
+        buttonContainerInternal.setBackground(iBlur3ButtonFactory.create(buttonContainerInternal)
+                .setColorProvider(BlurredBackgroundProviderImpl.premiumButton(resourceProvider))
+                .setRadius(dp(28))
+                .setPadding(dp(5)));
+        ScaleStateListAnimator.apply(buttonContainerInternal, 0.02f, 1.5f);
+
+        buttonContainer = new FrameLayout(context);
+        buttonContainer.addView(buttonContainerInternal, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, 48 + 8 + 8, Gravity.BOTTOM, 4, 0, 4, 0));
+
+        BlurredBackgroundWithFadeDrawable fade = new BlurredBackgroundWithFadeDrawable(iBlur3BackgroundFactory.create(buttonContainer));
+        fade.setFadeHeight(dp(40), true);
+        fade.setAlpha(220);
+        buttonContainer.setBackground(fade);
+        updateButtonState(false);
+    }
+
+    private Page getButtonPage() {
+        return viewPager != null && viewPager.getPositionAnimated() >= 0.5f ? namePage : profilePage;
+    }
+
+    private void updateButtonState(boolean animated) {
+        final Page page = getButtonPage();
+        if (button == null || page == null || page == buttonPage) {
+            return;
+        }
+        applyButtonState(page, animated);
+    }
+
+    private void applyButtonState(Page page, boolean animated) {
+        buttonPage = page;
+        button.setText(page.buttonState.text, animated);
+        button.setSubText(page.buttonState.subText, animated);
     }
 
     private boolean isDark = Theme.isCurrentThemeDark();
@@ -1060,21 +1835,18 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
     }
 
     private void setLoading(boolean loading) {
-        if (namePage != null && namePage.button != null) {
-            namePage.button.setLoading(loading);
-        }
-        if (profilePage != null && profilePage.button != null) {
-            profilePage.button.setLoading(loading);
+        if (button != null) {
+            button.setLoading(loading);
         }
     }
 
     @Override
-    public boolean onBackPressed() {
+    public boolean onBackPressed(boolean invoked) {
         if (!isChannel && hasUnsavedChanged() && getUserConfig().isPremium()) {
-            showUnsavedAlert();
+            if (invoked) showUnsavedAlert();
             return false;
         }
-        return super.onBackPressed();
+        return super.onBackPressed(invoked);
     }
 
     @Override
@@ -1090,17 +1862,17 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             return;
         }
         AlertDialog alertDialog = new AlertDialog.Builder(getContext(), getResourceProvider())
-            .setTitle(LocaleController.getString(isChannel ? R.string.ChannelColorUnsaved : R.string.UserColorUnsaved))
-            .setMessage(LocaleController.getString(isChannel ? R.string.ChannelColorUnsavedMessage : R.string.UserColorUnsavedMessage))
-            .setNegativeButton(LocaleController.getString(R.string.Dismiss), (di, w) -> {
-                finishFragment();
-            })
-            .setPositiveButton(LocaleController.getString(R.string.ApplyTheme), (di, w) -> {
-                buttonClick();
-            })
-            .create();
+                .setTitle(getString(isChannel ? R.string.ChannelColorUnsaved : R.string.UserColorUnsaved))
+                .setMessage(getString(isChannel ? R.string.ChannelColorUnsavedMessage : R.string.UserColorUnsavedMessage))
+                .setNegativeButton(getString(R.string.Dismiss), (di, w) -> {
+                    finishFragment();
+                })
+                .setPositiveButton(getString(R.string.ApplyTheme), (di, w) -> {
+                    buttonClick();
+                })
+                .create();
         showDialog(alertDialog);
-        ((TextView) alertDialog.getButton(DialogInterface.BUTTON_NEGATIVE)).setTextColor(getThemedColor(Theme.key_text_RedBold));
+        ThemeBind.textColor((TextView) alertDialog.getButton(DialogInterface.BUTTON_NEGATIVE), Theme.key_text_RedBold, getResourceProvider());
     }
 
     private void buttonClick() {
@@ -1116,9 +1888,62 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             }
         }
 
+        final Page page = getButtonPage();
+        if (page.selectedResaleGift != null) {
+            final Page otherPage = page == namePage ? profilePage : namePage;
+            otherPage.setupValues();
+
+            loading = true;
+            button.setLoading(true);
+            buy(page.selectedResaleGift, bought -> {
+                loading = false;
+                button.setLoading(false);
+                if (bought) {
+                    apply();
+                    finishFragment();
+                    showBulletin();
+                }
+            });
+            return;
+        } else {
+            final Page otherPage = page == namePage ? profilePage : namePage;
+            if (otherPage.selectedResaleGift != null) {
+                otherPage.setupValues();
+            }
+        }
+
         apply();
         finishFragment();
         showBulletin();
+    }
+
+    public void buy(TL_stars.TL_starGiftUnique gift, Utilities.Callback<Boolean> bought) {
+        final long to = UserConfig.getInstance(currentAccount).getClientUserId();
+        final AmountUtils.Currency currency = gift.resale_ton_only ?
+                AmountUtils.Currency.TON : AmountUtils.Currency.STARS;
+        StarsController.getInstance(currentAccount, currency).getResellingGiftForm(gift, to, form -> {
+            if (form == null) return;
+            final StarGiftSheet.PaymentFormState initial = new StarGiftSheet.PaymentFormState(currency, form);
+            final String giftName = gift.title + " #" + LocaleController.formatNumber(gift.num, ',');
+            final boolean[] buying = new boolean[1];
+            final StarGiftSheet.ResaleBuyTransferAlert sheet = new StarGiftSheet.ResaleBuyTransferAlert(getContext(), resourceProvider, gift, initial, currentAccount, to, giftName, false, (state, progress) -> {
+                buying[0] = true;
+                progress.init();
+                StarsController.getInstance(currentAccount, state.currency).buyResellingGift(state.form, gift, to, (status, err) -> {
+                    progress.end();
+                    if (bought != null) {
+                        bought.run(status);
+                    }
+                });
+            });
+            sheet.alertDialog.setOnDismissListener(di -> {
+                if (buying[0]) return;
+                if (bought != null) {
+                    bought.run(false);
+                }
+            });
+            sheet.show();
+        });
     }
 
     private boolean applyingName, applyingProfile;
@@ -1134,49 +1959,100 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             final TLRPC.User me = getUserConfig().getCurrentUser();
             if (me.color == null) {
                 me.color = new TLRPC.TL_peerColor();
+                me.color.flags |= 1;
                 me.color.color = (int) (me.id % 7);
             }
-            if (namePage.selectedColor != UserObject.getColorId(me) || namePage.selectedEmoji != UserObject.getEmojiId(me)) {
+            if (
+                    namePage.selectedColor != UserObject.getColorId(me) ||
+                            namePage.selectedEmoji != UserObject.getEmojiId(me) ||
+                            (namePage.selectedPeerCollectible == null ? 0 : namePage.selectedPeerCollectible.collectible_id) != (me.color instanceof TLRPC.TL_peerColorCollectible ? me.color.collectible_id : 0)
+            ) {
                 applyingName = true;
-                TLRPC.TL_account_updateColor req = new TLRPC.TL_account_updateColor();
+                final TL_account.updateColor req = new TL_account.updateColor();
                 me.flags2 |= 256;
                 me.color.flags |= 1;
-                req.flags |= 4;
-                req.color = me.color.color = namePage.selectedColor;
-                if (namePage.selectedEmoji != 0) {
-                    req.flags |= 1;
-                    me.color.flags |= 2;
-                    req.background_emoji_id = me.color.background_emoji_id = namePage.selectedEmoji;
+                if (namePage.selectedPeerCollectible != null) {
+                    req.flags |= 4;
+                    req.color = new TLRPC.TL_inputPeerColorCollectible();
+                    req.color.collectible_id = namePage.selectedPeerCollectible.collectible_id;
+                    me.color = namePage.selectedPeerCollectible;
                 } else {
-                    me.color.flags &=~ 2;
-                    me.color.background_emoji_id = 0;
+                    req.flags |= 4;
+                    req.color = new TLRPC.TL_peerColor();
+                    req.color.flags |= 1;
+                    req.color.color = namePage.selectedColor;
+                    me.color.flags |= 1;
+                    me.color.color = namePage.selectedColor;
+                    if (namePage.selectedEmoji != 0) {
+                        req.flags |= 1;
+                        me.color.flags |= 2;
+                        req.color.flags |= 2;
+                        req.color.background_emoji_id = me.color.background_emoji_id = namePage.selectedEmoji;
+                    } else {
+                        me.color.flags &= ~2;
+                        me.color.background_emoji_id = 0;
+                    }
                 }
                 getConnectionsManager().sendRequest(req, null);
             }
-            if (profilePage.selectedColor != UserObject.getProfileColorId(me) || profilePage.selectedEmoji != UserObject.getProfileEmojiId(me)) {
+            if (
+                    profilePage.selectedColor != UserObject.getProfileColorId(me) ||
+                            profilePage.selectedEmoji != UserObject.getOnlyProfileEmojiId(me) ||
+                            (profilePage.selectedEmojiCollectible == null ? 0 : profilePage.selectedEmojiCollectible.collectible_id) != UserObject.getProfileCollectibleId(me)
+            ) {
                 applyingProfile = true;
                 if (me.profile_color == null) {
                     me.profile_color = new TLRPC.TL_peerColor();
                 }
-                TLRPC.TL_account_updateColor req = new TLRPC.TL_account_updateColor();
+                TL_account.updateColor req = new TL_account.updateColor();
                 req.for_profile = true;
                 me.flags2 |= 512;
                 if (profilePage.selectedColor < 0) {
                     me.profile_color.flags &=~ 1;
                 } else {
+                    if (req.color == null) {
+                        req.flags |= 4;
+                        req.color = new TLRPC.TL_peerColor();
+                    }
+                    req.color.flags |= 1;
+                    req.color.color = profilePage.selectedColor;
                     me.profile_color.flags |= 1;
-                    req.flags |= 4;
-                    req.color = me.profile_color.color = profilePage.selectedColor;
+                    me.profile_color.color = profilePage.selectedColor;
                 }
                 if (profilePage.selectedEmoji != 0) {
                     req.flags |= 1;
                     me.profile_color.flags |= 2;
-                    req.background_emoji_id = me.profile_color.background_emoji_id = profilePage.selectedEmoji;
+                    if (req.color == null) {
+                        req.flags |= 4;
+                        req.color = new TLRPC.TL_peerColor();
+                    }
+                    req.color.flags |= 2;
+                    req.color.background_emoji_id = me.profile_color.background_emoji_id = profilePage.selectedEmoji;
                 } else {
                     me.profile_color.flags &=~ 2;
                     me.profile_color.background_emoji_id = 0;
                 }
                 getConnectionsManager().sendRequest(req, null);
+            }
+            if (!eq(me.emoji_status, profilePage.selectedEmojiCollectible) && (profilePage.selectedEmojiCollectible != null || DialogObject.isEmojiStatusCollectible(me.emoji_status))) {
+                TLRPC.EmojiStatus new_emoji_status = new TLRPC.TL_emojiStatusEmpty();
+                TL_stars.TL_starGiftUnique gift = null;
+                if (profilePage.selectedEmojiCollectible != null) {
+                    final long id = profilePage.selectedEmojiCollectible.collectible_id;
+                    for (int i = 0; i < profilePage.uniqueGifts.size(); ++i) {
+                        final TL_stars.TL_starGiftUnique g = profilePage.uniqueGifts.get(i);
+                        if (g.id == id) {
+                            gift = g;
+                            break;
+                        }
+                    }
+                }
+                if (gift != null) {
+                    TLRPC.TL_inputEmojiStatusCollectible status = new TLRPC.TL_inputEmojiStatusCollectible();
+                    status.collectible_id = gift.id;
+                    new_emoji_status = status;
+                }
+                getMessagesController().updateEmojiStatus(0, new_emoji_status, gift);
             }
             getMessagesController().putUser(me, false);
             getUserConfig().saveConfig(true);
@@ -1190,27 +2066,35 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
     private void showBulletin() {
         if (bulletinFragment != null) {
             if (applyingName && (!applyingProfile || getCurrentPage() == namePage)) {
-                BulletinFactory.of(bulletinFragment).createSimpleBulletin(
-                    PeerColorDrawable.from(currentAccount, namePage.selectedColor),
-                    LocaleController.getString(isChannel ? R.string.ChannelColorApplied : R.string.UserColorApplied)
-                ).show();
+                if (namePage.selectedColor < 0) {
+                    if (namePage.selectedPeerCollectible == null) return;
+                    BulletinFactory.of(bulletinFragment).createSimpleBulletin(
+                            PeerColorDrawable.from(namePage.selectedPeerCollectible),
+                            getString(isChannel ? R.string.ChannelColorApplied : R.string.UserColorApplied)
+                    ).show();
+                } else {
+                    BulletinFactory.of(bulletinFragment).createSimpleBulletin(
+                            PeerColorDrawable.from(currentAccount, namePage.selectedColor),
+                            getString(isChannel ? R.string.ChannelColorApplied : R.string.UserColorApplied)
+                    ).show();
+                }
             } else if (applyingProfile && (!applyingName || getCurrentPage() == profilePage)) {
                 if (profilePage.selectedColor < 0) {
                     if (profilePage.selectedEmoji != 0) {
                         BulletinFactory.of(bulletinFragment).createStaticEmojiBulletin(
-                            AnimatedEmojiDrawable.findDocument(currentAccount, profilePage.selectedEmoji),
-                            LocaleController.getString(isChannel ? R.string.ChannelProfileColorEmojiApplied : R.string.UserProfileColorEmojiApplied)
+                                AnimatedEmojiDrawable.findDocument(currentAccount, profilePage.selectedEmoji),
+                                getString(isChannel ? R.string.ChannelProfileColorEmojiApplied : R.string.UserProfileColorEmojiApplied)
                         ).show();
                     } else {
                         BulletinFactory.of(bulletinFragment).createSimpleBulletin(
-                            R.raw.contact_check,
-                            LocaleController.getString(isChannel ? R.string.ChannelProfileColorResetApplied : R.string.UserProfileColorResetApplied)
+                                R.raw.contact_check,
+                                getString(isChannel ? R.string.ChannelProfileColorResetApplied : R.string.UserProfileColorResetApplied)
                         ).show();
                     }
                 } else {
                     BulletinFactory.of(bulletinFragment).createSimpleBulletin(
-                        PeerColorDrawable.fromProfile(currentAccount, profilePage.selectedColor),
-                        LocaleController.getString(isChannel ? R.string.ChannelProfileColorApplied : R.string.UserProfileColorApplied)
+                            PeerColorDrawable.fromProfile(currentAccount, profilePage.selectedColor),
+                            getString(isChannel ? R.string.ChannelProfileColorApplied : R.string.UserProfileColorApplied)
                     ).show();
                 }
             }
@@ -1228,6 +2112,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
     public void onFragmentDestroy() {
         super.onFragmentDestroy();
         getNotificationCenter().removeObserver(this, NotificationCenter.currentUserPremiumStatusChanged);
+        getNotificationCenter().removeObserver(this, NotificationCenter.starUserGiftsLoaded);
+        getNotificationCenter().removeObserver(this, NotificationCenter.starGiftsLoaded);
     }
 
     private List<TLRPC.TL_availableReaction> getAvailableReactions() {
@@ -1253,9 +2139,18 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         );
     }
 
-    @SuppressLint("NotifyDataSetChanged")
+    @Override
+    public void onThemeColorsChanged() {
+        try {
+            if (namePage != null && profilePage != null) {
+                updateColors();
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
+
     private void updateColors() {
-        contentView.setBackgroundColor(getThemedColor(Theme.key_windowBackgroundGray));
         if (titleView != null) {
             titleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
         }
@@ -1264,8 +2159,52 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         if (colorBar != null) {
             colorBar.updateColors();
         }
+        updateTabColors();
+        checkColors();
         setNavigationBarColor(getNavigationBarColor());
     }
+
+    private void checkPagesColors() {
+        final int bgColor = getThemedColor(Theme.key_windowBackgroundWhite);
+        final int color;
+        if (AndroidUtilities.computePerceivedBrightness(bgColor) > 0.72) {
+            color = ColorUtils.blendARGB(getThemedColor(Theme.key_windowBackgroundGray), colorBar.getColor(), 0.085f);
+        } else {
+            color = getThemedColor(Theme.key_windowBackgroundGray);
+        }
+        contentView.setBackgroundColor(color);
+        final int oldColor = iBlur3SourceBackgroundColor.getColor();
+        if (oldColor != color) {
+            iBlur3SourceBackgroundColor.setColor(color);
+            for (BlurredBackgroundDrawable d : glassAttachedDrawables) {
+                d.updateColors();
+            }
+            invalidateAllGlassAttachedViews();
+        }
+    }
+
+    private void updateTabColors() {
+        if (colorBar == null) {
+            return;
+        }
+        checkPagesColors();
+        final int profileBackgroundColor = colorBar.getTabsViewBackgroundColor();
+        if (tabsView != null) {
+            final float progressP = viewPager == null ? 0f : viewPager.getPositionAnimated();
+            final float progress = getTabProgressFromPageProgress(progressP);
+            tabsView.setColors(
+                    ColorUtils.blendARGB(profileBackgroundColor, getThemedColor(Theme.key_windowBackgroundWhite), progress),
+                    ColorUtils.blendARGB(Color.WHITE, getThemedColor(Theme.key_windowBackgroundGray), progress),
+                    ColorUtils.blendARGB(Color.WHITE, getThemedColor(Theme.key_windowBackgroundWhiteGrayText2), progress),
+                    ColorUtils.blendARGB(profileBackgroundColor, getThemedColor(Theme.key_windowBackgroundWhiteBlackText), progress)
+            );
+        }
+    }
+
+    private float getTabProgressFromPageProgress(float progress) {
+        return MathUtils.clamp((progress - 0.333333f) / 0.333333f, 0 ,1);
+    }
+
 
     @SuppressLint("NotifyDataSetChanged")
     @Override
@@ -1274,6 +2213,12 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         if (id == NotificationCenter.currentUserPremiumStatusChanged) {
             namePage.premiumChanged();
             profilePage.premiumChanged();
+        } else if (id == NotificationCenter.starUserGiftsLoaded) {
+            namePage.update();
+            profilePage.update();
+        } else if (id == NotificationCenter.starGiftsLoaded) {
+            namePage.update();
+            profilePage.update();
         }
     }
 
@@ -1291,7 +2236,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
         public LevelLock(Context context, boolean plus, int lvl, Theme.ResourcesProvider resourcesProvider) {
             this.resourcesProvider = resourcesProvider;
-            text = new Text(LocaleController.formatPluralString(plus ? "BoostLevelPlus" : "BoostLevel", lvl), 12, AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+            text = new Text(LocaleController.formatPluralString(plus ? "BoostLevelPlus" : "BoostLevel", lvl), 12, AndroidUtilities.bold());
             lock = context.getResources().getDrawable(R.drawable.mini_switch_lock).mutate();
             lock.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
             gradientTools = new PremiumGradient.PremiumGradientTools(Theme.key_premiumGradient1, Theme.key_premiumGradient2, -1, -1, -1, resourcesProvider);
@@ -1307,10 +2252,10 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(10), dp(10), gradientTools.paint);
 
             lock.setBounds(
-                left + dp(3.33f),
-                (int) (cy - lock.getIntrinsicHeight() * lockScale / 2f),
-                (int) (left + dp(3.33f) + lock.getIntrinsicWidth() * lockScale),
-                (int) (cy + lock.getIntrinsicHeight() * lockScale / 2f)
+                    left + dp(3.33f),
+                    (int) (cy - lock.getIntrinsicHeight() * lockScale / 2f),
+                    (int) (left + dp(3.33f) + lock.getIntrinsicWidth() * lockScale),
+                    (int) (cy + lock.getIntrinsicHeight() * lockScale / 2f)
             );
             lock.draw(canvas);
 
@@ -1350,7 +2295,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         return ssb;
     }
 
-    public static class ChangeNameColorCell extends View {
+    public static class ChangeNameColorCell extends View implements Theme.Colorable {
         private final int currentAccount;
         private final boolean isChannelOrGroup;
         private final boolean isGroup;
@@ -1379,8 +2324,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             this.resourcesProvider = resourcesProvider;
 
             drawable = context.getResources().getDrawable(R.drawable.menu_edit_appearance).mutate();
-            drawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider), PorterDuff.Mode.SRC_IN));
-            CharSequence button = LocaleController.getString(isChannelOrGroup ? (isGroup ? R.string.ChangeGroupAppearance : R.string.ChangeChannelNameColor2) : R.string.ChangeUserNameColor);
+            ThemeBind.drawableColorFilter(this, drawable, Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider, PorterDuff.Mode.SRC_IN);
+            CharSequence button = getString(isChannelOrGroup ? (isGroup ? R.string.ChangeGroupAppearance : R.string.ChangeChannelNameColor2) : R.string.ChangeUserNameColor);
             if (isChannelOrGroup && !isGroup && MessagesController.getInstance(currentAccount).getMainSettings().getInt("boostingappearance", 0) < 3) {
                 int minlvl = Integer.MAX_VALUE, maxlvl = 0;
                 if (mc.peerColors != null) {
@@ -1410,15 +2355,23 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     lock = new LevelLock(context, true, Math.max(currentLevel, minlvl), resourcesProvider);
                 }
             }
-            if (isChannelOrGroup && lock == null) {
-                button = TextCell.applyNewSpan(button);
-            }
+            setContentDescription(button);
             buttonText = new Text(button, 16);
             updateColors();
         }
 
+        private boolean drawableColorSet;
+        private int drawableColor;
+
+        /** also called on every theme update (Theme.Colorable) */
+        @Override
         public void updateColors() {
-            drawable.setColorFilter(new PorterDuffColorFilter(Theme.getColor(isChannelOrGroup ? Theme.key_windowBackgroundWhiteGrayIcon : Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider), PorterDuff.Mode.SRC_IN));
+            final int iconColor = Theme.getColor(isChannelOrGroup ? Theme.key_windowBackgroundWhiteGrayIcon : Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider);
+            if (!drawableColorSet || drawableColor != iconColor) {
+                drawableColorSet = true;
+                drawableColor = iconColor;
+                drawable.setColorFilter(new PorterDuffColorFilter(iconColor, PorterDuff.Mode.SRC_IN));
+            }
             buttonText.setColor(Theme.getColor(isChannelOrGroup ? Theme.key_windowBackgroundWhiteBlackText : Theme.key_windowBackgroundWhiteBlueText4, resourcesProvider));
 
             if (userText != null && userTextBackgroundPaint != null && userTextColorKey != -1) {
@@ -1435,26 +2388,56 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             needDivider = divider;
             CharSequence text = chat.title;
             text = Emoji.replaceEmoji(text, Theme.chat_msgTextPaint.getFontMetricsInt(), false);
-            userText = new Text(text, 13, AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
-            final int color;
-            int colorId = ChatObject.getColorId(chat);
-            if (colorId < 7) {
-                color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[colorId], resourcesProvider);
+            userText = new Text(text, 13, AndroidUtilities.bold());
+
+            if (color1Drawable != null) {
+                color1Drawable.setView(null);
+            }
+            if (chat.emoji_status instanceof TLRPC.TL_emojiStatusCollectible) {
+                color1Drawable = PeerColorDrawable.from((TLRPC.TL_emojiStatusCollectible) chat.emoji_status);
             } else {
-                MessagesController.PeerColors peerColors = MessagesController.getInstance(UserConfig.selectedAccount).peerColors;
-                MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
-                if (peerColor != null) {
-                    userTextColorKey = -1;
-                    color = peerColor.getColor1();
+                color1Drawable = ChatObject.getProfileColorId(chat) >= 0 ? PeerColorDrawable.fromProfile(currentAccount, ChatObject.getProfileColorId(chat)).setRadius(dp(11)) : null;
+            }
+            if (color1Drawable != null) {
+                color1Drawable.setView(this);
+            }
+            final int color;
+            if (chat.color instanceof TLRPC.TL_peerColorCollectible) {
+                final TLRPC.TL_peerColorCollectible p = (TLRPC.TL_peerColorCollectible) chat.color;
+                final boolean dark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                final int accent_color = dark && (p.flags & 1) != 0 ? p.dark_accent_color : p.accent_color;
+                final ArrayList<Integer> colors = dark && p.dark_colors != null ? p.dark_colors : p.colors;
+
+                final int color1 = colors.get(0) | 0xFF000000;
+                final int color2 = colors.size() >= 2 ? colors.get(1) | 0xFF000000 : color1;
+                final int color3 = colors.size() >= 3 ? colors.get(2) | 0xFF000000 : color1;
+
+                userText.setColor(accent_color);
+                userTextBackgroundPaint.setColor(Theme.multAlpha(accent_color, .10f));
+                color2Drawable = new PeerColorDrawable(color1, color2, color3, p.gift_emoji_id).setRadius(dp(11));
+                color2Drawable.setView(this);
+            } else {
+                int colorId = ChatObject.getColorId(chat);
+                if (colorId < 7) {
+                    color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[colorId], resourcesProvider);
                 } else {
-                    color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[0], resourcesProvider);
+                    MessagesController.PeerColors peerColors = MessagesController.getInstance(UserConfig.selectedAccount).peerColors;
+                    MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
+                    if (peerColor != null) {
+                        userTextColorKey = -1;
+                        color = peerColor.getColor1();
+                    } else {
+                        color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[0], resourcesProvider);
+                    }
+                }
+
+                userText.setColor(color);
+                userTextBackgroundPaint.setColor(Theme.multAlpha(color, .10f));
+                color2Drawable = PeerColorDrawable.from(currentAccount, colorId).setRadius(dp(11));
+                if (color2Drawable != null) {
+                    color2Drawable.setView(this);
                 }
             }
-            userText.setColor(color);
-            userTextBackgroundPaint.setColor(Theme.multAlpha(color, .10f));
-
-            color1Drawable = PeerColorDrawable.from(currentAccount, colorId).setRadius(dp(11));
-            color2Drawable = ChatObject.getProfileColorId(chat) >= 0 ? PeerColorDrawable.fromProfile(currentAccount, ChatObject.getProfileColorId(chat)).setRadius(dp(11)) : null;
         }
 
         public void set(TLRPC.User user) {
@@ -1468,26 +2451,51 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             }
             CharSequence text = name;
             text = Emoji.replaceEmoji(text, Theme.chat_msgTextPaint.getFontMetricsInt(), false);
-            userText = new Text(text, 13, AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
-            final int color;
-            int colorId = UserObject.getColorId(user);
-            if (colorId < 7) {
-                color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[colorId], resourcesProvider);
-            } else {
-                MessagesController.PeerColors peerColors = MessagesController.getInstance(UserConfig.selectedAccount).peerColors;
-                MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
-                if (peerColor != null) {
-                    userTextColorKey = -1;
-                    color = peerColor.getColor1();
-                } else {
-                    color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[0], resourcesProvider);
-                }
+            userText = new Text(text, 13, AndroidUtilities.bold());
+            if (color1Drawable != null) {
+                color1Drawable.setView(null);
             }
-            userText.setColor(color);
-            userTextBackgroundPaint.setColor(Theme.multAlpha(color, .10f));
+            if (user.emoji_status instanceof TLRPC.TL_emojiStatusCollectible) {
+                color1Drawable = PeerColorDrawable.from((TLRPC.TL_emojiStatusCollectible) user.emoji_status);
+            } else {
+                color1Drawable = UserObject.getProfileColorId(user) >= 0 ? PeerColorDrawable.fromProfile(currentAccount, UserObject.getProfileColorId(user)).setRadius(dp(11)) : null;
+            }
+            if (color1Drawable != null) {
+                color1Drawable.setView(this);
+            }
+            if (user.color instanceof TLRPC.TL_peerColorCollectible) {
+                final TLRPC.TL_peerColorCollectible p = (TLRPC.TL_peerColorCollectible) user.color;
+                final boolean dark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                final int accent_color = dark && (p.flags & 1) != 0 ? p.dark_accent_color : p.accent_color;
+                final ArrayList<Integer> colors = dark && p.dark_colors != null ? p.dark_colors : p.colors;
 
-            color1Drawable = PeerColorDrawable.from(currentAccount, colorId).setRadius(dp(11));
-            color2Drawable = UserObject.getProfileColorId(user) >= 0 ? PeerColorDrawable.fromProfile(currentAccount, UserObject.getProfileColorId(user)).setRadius(dp(11)) : null;
+                final int color1 = colors.get(0) | 0xFF000000;
+                final int color2 = colors.size() >= 2 ? colors.get(1) | 0xFF000000 : color1;
+                final int color3 = colors.size() >= 3 ? colors.get(2) | 0xFF000000 : color1;
+
+                userText.setColor(accent_color);
+                userTextBackgroundPaint.setColor(Theme.multAlpha(accent_color, .10f));
+                color2Drawable = new PeerColorDrawable(color1, color2, color3, p.gift_emoji_id).setRadius(dp(11));
+                color2Drawable.setView(this);
+            } else {
+                final int color;
+                int colorId = UserObject.getColorId(user);
+                if (colorId < 7) {
+                    color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[colorId], resourcesProvider);
+                } else {
+                    MessagesController.PeerColors peerColors = MessagesController.getInstance(UserConfig.selectedAccount).peerColors;
+                    MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
+                    if (peerColor != null) {
+                        userTextColorKey = -1;
+                        color = peerColor.getColor1();
+                    } else {
+                        color = Theme.getColor(userTextColorKey = Theme.keys_avatar_nameInMessage[0], resourcesProvider);
+                    }
+                }
+                userText.setColor(color);
+                userTextBackgroundPaint.setColor(Theme.multAlpha(color, .10f));
+                color2Drawable = PeerColorDrawable.from(currentAccount, colorId).setRadius(dp(11));
+            }
         }
 
         @Override
@@ -1504,12 +2512,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
         @Override
         protected void dispatchDraw(Canvas canvas) {
-            drawable.setBounds(
-                rtl(dp(64) / 2) - drawable.getIntrinsicWidth() / 2,
-                getMeasuredHeight() / 2 - drawable.getIntrinsicHeight() / 2,
-                rtl(dp(64) / 2) + drawable.getIntrinsicWidth() / 2,
-                getMeasuredHeight() / 2 + drawable.getIntrinsicHeight() / 2
-            );
+            DrawableUtils.setBounds(drawable, rtl(dp(64) / 2), getMeasuredHeight() / 2f, Gravity.CENTER);
             drawable.draw(canvas);
             buttonText.ellipsize(getMeasuredWidth() - dp(64 + 7 + 100) - (lock != null ? lock.getIntrinsicWidth() + dp(8) : 0));
             float textX = LocaleController.isRTL ? getMeasuredWidth() - buttonText.getWidth() - dp(64 + 7) : dp(64 + 7);
@@ -1550,8 +2553,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(12), dp(12), userTextBackgroundPaint);
 
                 userText
-                    .ellipsize(maxWidth)
-                    .draw(canvas, LocaleController.isRTL ? dp(15 + 9) : getMeasuredWidth() - dp(15 + 9) - w, getMeasuredHeight() / 2f);
+                        .ellipsize(maxWidth)
+                        .draw(canvas, LocaleController.isRTL ? dp(15 + 9) : getMeasuredWidth() - dp(15 + 9) - w, getMeasuredHeight() / 2f);
             }
 
             if (needDivider) {
@@ -1559,12 +2562,12 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 if (paint == null) {
                     paint = Theme.dividerPaint;
                 }
-                canvas.drawLine(LocaleController.isRTL ? 0 : AndroidUtilities.dp(64), getMeasuredHeight() - 1, getMeasuredWidth() - (LocaleController.isRTL ? AndroidUtilities.dp(64) : 0), getMeasuredHeight() - 1, paint);
+                canvas.drawLine(LocaleController.isRTL ? 0 : AndroidUtilities.dp(64 + 7), getMeasuredHeight() - 1, getMeasuredWidth() - (LocaleController.isRTL ? AndroidUtilities.dp(64 + 7) : 0), getMeasuredHeight() - 1, paint);
             }
         }
     }
 
-    public static class PeerColorGrid extends View {
+    public static class PeerColorGrid extends View implements Theme.Colorable {
         private final Theme.ResourcesProvider resourcesProvider;
         private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
         { backgroundPaint.setStyle(Paint.Style.STROKE); }
@@ -1672,10 +2675,10 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     canvas.save();
                     final float color3Size = (bounds.width() * .315f);
                     AndroidUtilities.rectTmp.set(
-                        bounds.centerX() - color3Size / 2f,
-                        bounds.centerY() - color3Size / 2f,
-                        bounds.centerX() + color3Size / 2f,
-                        bounds.centerY() + color3Size / 2f
+                            bounds.centerX() - color3Size / 2f,
+                            bounds.centerY() - color3Size / 2f,
+                            bounds.centerX() + color3Size / 2f,
+                            bounds.centerY() + color3Size / 2f
                     );
                     canvas.rotate(45f, bounds.centerX(), bounds.centerY());
                     canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(2.33f), dp(2.33f), paint3);
@@ -1688,9 +2691,9 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     backgroundPaint.setStrokeWidth(dpf2(2));
                     backgroundPaint.setColor(Theme.getColor(Theme.key_windowBackgroundWhite, resourcesProvider));
                     canvas.drawCircle(
-                        bounds.centerX(), bounds.centerY(),
-                        Math.min(bounds.height() / 2f, bounds.width() / 2f) + backgroundPaint.getStrokeWidth() * lerp(.5f, -2f, selectT),
-                        backgroundPaint
+                            bounds.centerX(), bounds.centerY(),
+                            Math.min(bounds.height() / 2f, bounds.width() / 2f) + backgroundPaint.getStrokeWidth() * lerp(.5f, -2f, selectT),
+                            backgroundPaint
                     );
                 }
 
@@ -1701,10 +2704,10 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                             lockDrawable.setColorFilter(new PorterDuffColorFilter(Color.WHITE, PorterDuff.Mode.SRC_IN));
                         }
                         lockDrawable.setBounds(
-                            (int) (bounds.centerX() - lockDrawable.getIntrinsicWidth() / 2f * 1.2f),
-                            (int) (bounds.centerY() - lockDrawable.getIntrinsicHeight() / 2f * 1.2f),
-                            (int) (bounds.centerX() + lockDrawable.getIntrinsicWidth() / 2f * 1.2f),
-                            (int) (bounds.centerY() + lockDrawable.getIntrinsicHeight() / 2f * 1.2f)
+                                (int) (bounds.centerX() - lockDrawable.getIntrinsicWidth() / 2f * 1.2f),
+                                (int) (bounds.centerY() - lockDrawable.getIntrinsicHeight() / 2f * 1.2f),
+                                (int) (bounds.centerX() + lockDrawable.getIntrinsicWidth() / 2f * 1.2f),
+                                (int) (bounds.centerY() + lockDrawable.getIntrinsicHeight() / 2f * 1.2f)
                         );
                         lockDrawable.draw(canvas);
                     } else {
@@ -1758,6 +2761,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             this.lock = lock;
         }
 
+        /** also called on every theme update (Theme.Colorable) */
+        @Override
         public void updateColors() {
             if (buttons == null) return;
             final MessagesController mc = MessagesController.getInstance(currentAccount);
@@ -1968,6 +2973,24 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
     public static class PeerColorDrawable extends Drawable {
 
+        public static PeerColorDrawable from(TLRPC.TL_peerColorCollectible peerColorCollectible) {
+            final boolean dark = Theme.isCurrentThemeDark();
+            final ArrayList<Integer> colors = dark && peerColorCollectible.dark_colors != null ? peerColorCollectible.dark_colors : peerColorCollectible.colors;
+            if (colors == null || colors.isEmpty())
+                return null;
+
+            final int color1 = colors.get(0) | 0xFF000000;
+            final int color2 = colors.size() >= 2 ? colors.get(1) | 0xFF000000 : color1;
+            final int color3 = colors.size() >= 3 ? colors.get(2) | 0xFF000000 : color1;
+
+            return new PeerColorDrawable(color1, color2, color3, peerColorCollectible.gift_emoji_id);
+        }
+
+        public static PeerColorDrawable from(TLRPC.TL_emojiStatusCollectible emojiStatus) {
+            final int color = emojiStatus.center_color | 0xFF000000;
+            return new PeerColorDrawable(color, color, color, emojiStatus.document_id);
+        }
+
         public static PeerColorDrawable from(int currentAccount, int colorId) {
             if (colorId < 7) {
                 return new PeerColorDrawable(Theme.getColor(Theme.keys_avatar_nameInMessage[colorId]), Theme.getColor(Theme.keys_avatar_nameInMessage[colorId]), Theme.getColor(Theme.keys_avatar_nameInMessage[colorId]));
@@ -2016,13 +3039,57 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         private final Path color2Path = new Path();
         private final Path clipCirclePath = new Path();
 
+        private final AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable emoji;
+
         public PeerColorDrawable(int color1, int color2, int color3) {
+            hasColor3 = color3 != color1;
+            color1Paint.setColor(color1);
+            color2Paint.setColor(color2);
+            color3Paint.setColor(color3);
+            emoji = null;
+
+            initPath();
+        }
+
+        public PeerColorDrawable(int color1, int color2, int color3, long emojiId) {
             hasColor3 = color3 != color1;
             color1Paint.setColor(color1);
             color2Paint.setColor(color2);
             color3Paint.setColor(color3);
 
             initPath();
+
+            emoji = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(null, dp(14));
+            emoji.set(emojiId, false);
+        }
+
+        public PeerColorDrawable setView(View view) {
+            if (view == null) {
+                if (emoji != null) {
+                    emoji.detach();
+                    emoji.setParentView(null);
+                }
+                return this;
+            }
+            if (emoji != null) {
+                emoji.setParentView(view);
+            }
+            view.addOnAttachStateChangeListener(new View.OnAttachStateChangeListener() {
+                @Override
+                public void onViewAttachedToWindow(@NonNull View view) {
+                    if (emoji != null) {
+                        emoji.attach();
+                    }
+                }
+
+                @Override
+                public void onViewDetachedFromWindow(@NonNull View view) {
+                    if (emoji != null) {
+                        emoji.detach();
+                    }
+                }
+            });
+            return this;
         }
 
         private void initPath() {
@@ -2051,6 +3118,16 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 canvas.drawRoundRect(AndroidUtilities.rectTmp, dp(2.33f), dp(2.33f), color3Paint);
             }
             canvas.restore();
+            if (emoji != null) {
+                final int sz = dp(14);
+                emoji.setBounds(
+                        getBounds().centerX() - sz / 2,
+                        getBounds().centerY() - sz / 2,
+                        getBounds().centerX() + sz / 2,
+                        getBounds().centerY() + sz / 2
+                );
+                emoji.draw(canvas);
+            }
         }
 
         @Override
@@ -2088,13 +3165,20 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         }
 
         public void setColor(int currentAccount, int colorId, boolean animated) {
+            MessagesController.PeerColor peerColor = null;
+            if (colorId >= 0 && currentAccount >= 0) {
+                MessagesController.PeerColors peerColors = MessagesController.getInstance(currentAccount).profilePeerColors;
+                peerColor = peerColors == null ? null : peerColors.getColor(colorId);
+            }
+            setColor(peerColor, animated);
+        }
+
+        public void setColor(MessagesController.PeerColor peerColor, boolean animated) {
             isDefault = false;
-            if (colorId < 0 || currentAccount < 0) {
+            if (peerColor == null) {
                 isDefault = true;
                 color1 = color2 = Theme.getColor(Theme.key_actionBarDefault, resourcesProvider);
             } else {
-                MessagesController.PeerColors peerColors = MessagesController.getInstance(currentAccount).profilePeerColors;
-                MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
                 if (peerColor != null) {
                     final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
                     color1 = peerColor.getBgColor1(isDark);
@@ -2125,8 +3209,8 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         private final AnimatedColor color1Animated = new AnimatedColor(this, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
         private final AnimatedColor color2Animated = new AnimatedColor(this, 350, CubicBezierInterpolator.EASE_OUT_QUINT);
 
-        private int backgroundGradientColor1, backgroundGradientColor2, backgroundGradientHeight;
-        private LinearGradient backgroundGradient;
+        private int backgroundGradientColor1, backgroundGradientColor2, backgroundGradientWidth, backgroundGradientHeight;
+        private RadialGradient backgroundGradient;
         private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
 
         protected void onUpdateColor() {
@@ -2135,31 +3219,47 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
         @Override
         protected void dispatchDraw(Canvas canvas) {
+            if (isDefault) {
+                // follow theme switches while showing the default color
+                final int defColor = Theme.getColor(Theme.key_actionBarDefault, resourcesProvider);
+                if (this.color1 != defColor || this.color2 != defColor) {
+                    this.color1 = this.color2 = defColor;
+                    color1Animated.set(defColor, true);
+                    color2Animated.set(defColor, true);
+                }
+            }
             final int color1 = color1Animated.set(this.color1);
             final int color2 = color2Animated.set(this.color2);
-            if (backgroundGradient == null || backgroundGradientColor1 != color1 || backgroundGradientColor2 != color2 || backgroundGradientHeight != getHeight()) {
-                backgroundGradient = new LinearGradient(0, 0, 0, backgroundGradientHeight = getHeight(), new int[] { backgroundGradientColor2 = color2, backgroundGradientColor1 = color1 }, new float[] { 0, 1 }, Shader.TileMode.CLAMP);
+            if (backgroundGradient == null || backgroundGradientColor1 != color1 || backgroundGradientColor2 != color2 || backgroundGradientWidth != getWidth() || backgroundGradientHeight != getHeight()) {
+                backgroundGradientWidth = getWidth();
+                backgroundGradientHeight = getHeight();
+                backgroundGradient = new RadialGradient(
+                        backgroundGradientWidth / 2f, backgroundGradientHeight * 0.40f,
+                        distance(0, 0, backgroundGradientWidth, backgroundGradientHeight) * 0.75f,
+                        new int[] { backgroundGradientColor2 = color2, backgroundGradientColor1 = color1 },
+                        new float[] { 0, 1 },
+                        Shader.TileMode.CLAMP
+                );
                 backgroundPaint.setShader(backgroundGradient);
                 onUpdateColor();
             }
-            if (progressToGradient < 1) {
+            if (progressToGradient < 1 && !newMode) {
                 canvas.drawColor(defaultColor);
             }
-            if (progressToGradient > 0) {
-                backgroundPaint.setAlpha((int) (0xFF * progressToGradient));
-                canvas.drawRect(0, 0, getWidth(), getHeight(), backgroundPaint);
-            }
+            backgroundPaint.setAlpha(newMode ? 255 : (int) (0xFF * progressToGradient));
+            canvas.drawRect(0, 0, getWidth(), getHeight(), backgroundPaint);
         }
 
+        protected boolean newMode;
         protected boolean ignoreMeasure;
 
         @Override
         protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
-            super.onMeasure(widthMeasureSpec, ignoreMeasure ? heightMeasureSpec : MeasureSpec.makeMeasureSpec(AndroidUtilities.statusBarHeight + dp(144), MeasureSpec.EXACTLY));
+            super.onMeasure(widthMeasureSpec, ignoreMeasure ? heightMeasureSpec : MeasureSpec.makeMeasureSpec(AndroidUtilities.statusBarHeight + dp(230), MeasureSpec.EXACTLY));
         }
 
         public void updateColors() {
-            defaultColor = Theme.getColor(Theme.key_actionBarDefault, resourcesProvider);
+            defaultColor = Theme.getColor(Theme.key_windowBackgroundGray, resourcesProvider);
             onUpdateColor();
             invalidate();
         }
@@ -2174,20 +3274,20 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
         public int getTabsViewBackgroundColor() {
             return (
-                ColorUtils.blendARGB(
-                    AndroidUtilities.computePerceivedBrightness(Theme.getColor(Theme.key_actionBarDefault, resourcesProvider)) > .721f ?
-                        Theme.getColor(Theme.key_actionBarDefaultIcon, resourcesProvider) :
-                        Theme.adaptHSV(Theme.getColor(Theme.key_actionBarDefault, resourcesProvider), +.08f, -.08f),
-                    AndroidUtilities.computePerceivedBrightness(ColorUtils.blendARGB(color1Animated.get(), color2Animated.get(), .75f)) > .721f ?
-                        Theme.getColor(Theme.key_windowBackgroundWhiteBlueIcon, resourcesProvider) :
-                        Theme.adaptHSV(ColorUtils.blendARGB(color1Animated.get(), color2Animated.get(), .75f), +.08f, -.08f),
-                    progressToGradient
-                )
+                    ColorUtils.blendARGB(
+                            AndroidUtilities.computePerceivedBrightness(Theme.getColor(Theme.key_actionBarDefault, resourcesProvider)) > .721f ?
+                                    Theme.getColor(Theme.key_actionBarDefaultIcon, resourcesProvider) :
+                                    Theme.adaptHSV(Theme.getColor(Theme.key_actionBarDefault, resourcesProvider), +.08f, -.08f),
+                            AndroidUtilities.computePerceivedBrightness(ColorUtils.blendARGB(color1Animated.get(), color2Animated.get(), .75f)) > .721f ?
+                                    Theme.getColor(Theme.key_windowBackgroundWhiteBlueIcon, resourcesProvider) :
+                                    Theme.adaptHSV(ColorUtils.blendARGB(color1Animated.get(), color2Animated.get(), .75f), +.08f, -.08f),
+                            progressToGradient
+                    )
             );
         }
     }
 
-    public static class ProfilePreview extends FrameLayout {
+    public static class ProfilePreview extends FrameLayout implements Theme.Colorable {
 
         private final Theme.ResourcesProvider resourcesProvider;
         private final int currentAccount;
@@ -2198,11 +3298,15 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
         protected final AvatarDrawable avatarDrawable = new AvatarDrawable();
         protected final SimpleTextView titleView, subtitleView;
 
+        private boolean isForum;
+
+        private final AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable botVerificationEmoji;
         private final AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable statusEmoji;
-
         private final AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable emoji = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(this, false, dp(20), AnimatedEmojiDrawable.CACHE_TYPE_ALERT_PREVIEW_STATIC);
-
         private final StoriesUtilities.StoryGradientTools storyGradient = new StoriesUtilities.StoryGradientTools(this, false);
+
+        private boolean isEmojiCollectible;
+        private final AnimatedFloat emojiCollectible = new AnimatedFloat(this, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
 
         public ProfilePreview(Context context, int currentAccount, long dialogId, Theme.ResourcesProvider resourcesProvider) {
             super(context);
@@ -2225,22 +3329,24 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     statusEmoji.detach();
                 }
             };
-            statusEmoji = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(titleView, true, dp(24));
-            titleView.setDrawablePadding(dp(8));
-            titleView.setRightDrawable(statusEmoji);
+            botVerificationEmoji = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(titleView, dp(17));
+            statusEmoji = new AnimatedEmojiDrawable.SwapAnimatedEmojiDrawable(titleView, dp(24));
+            titleView.setLeftDrawableOutside(true);
+            titleView.setRightDrawableOutside(true);
             titleView.setTextColor(0xFFFFFFFF);
             titleView.setTextSize(20);
-            titleView.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
-            titleView.setScrollNonFitText(true);
-            addView(titleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 97, 0, 16, 50.33f));
+            titleView.setTypeface(AndroidUtilities.bold());
+            titleView.setWidthWrapContent(true);
+            addView(titleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM, 16, 0, 16, 40.33f));
 
             subtitleView = new SimpleTextView(context);
             subtitleView.setTextSize(14);
             subtitleView.setTextColor(0x80FFFFFF);
-            subtitleView.setScrollNonFitText(true);
-            addView(subtitleView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, Gravity.LEFT | Gravity.BOTTOM, 97, 0, 16, 30.66f));
+            subtitleView.setGravity(Gravity.CENTER_HORIZONTAL);
+            addView(subtitleView, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.CENTER_HORIZONTAL | Gravity.BOTTOM, 16, 0, 16, 20.66f));
 
-            imageReceiver.setRoundRadius(dp(54));
+            imageReceiver.setRoundRadius(dp(96));
+            long botVerificationId = 0, emojiStatusId = 0;
             CharSequence title;
             if (isChannel) {
                 TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
@@ -2248,18 +3354,29 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
                 avatarDrawable.setInfo(currentAccount, chat);
                 imageReceiver.setForUserOrChat(chat, avatarDrawable);
+
+                botVerificationId = DialogObject.getBotVerificationIcon(chat);
+                emojiStatusId = chat != null ? DialogObject.getEmojiStatusDocumentId(chat.emoji_status) : 0;
             } else {
                 TLRPC.User user = UserConfig.getInstance(currentAccount).getCurrentUser();
                 title = UserObject.getUserName(user);
 
                 avatarDrawable.setInfo(currentAccount, user);
                 imageReceiver.setForUserOrChat(user, avatarDrawable);
+
+                botVerificationId = DialogObject.getBotVerificationIcon(user);
+                emojiStatusId = user != null ? DialogObject.getEmojiStatusDocumentId(user.emoji_status) : 0;
             }
             try {
                 title = Emoji.replaceEmoji(title, null, false);
-            } catch (Exception ignore) {}
+            } catch (Exception ignore) {
+            }
 
             titleView.setText(title);
+            botVerificationEmoji.set(botVerificationId, false);
+            titleView.setLeftDrawable(botVerificationEmoji);
+            statusEmoji.set(emojiStatusId, false);
+            titleView.setRightDrawable(statusEmoji);
 
             if (isChannel) {
                 TLRPC.Chat chat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
@@ -2279,13 +3396,13 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 } else {
                     final boolean isPublic = ChatObject.isPublic(chat);
                     if (ChatObject.isChannelAndNotMegaGroup(chat)) {
-                        subtitleView.setText(LocaleController.getString(isPublic ? R.string.ChannelPublic : R.string.ChannelPrivate).toLowerCase());
+                        subtitleView.setText(getString(isPublic ? R.string.ChannelPublic : R.string.ChannelPrivate).toLowerCase());
                     } else {
-                        subtitleView.setText(LocaleController.getString(isPublic ? R.string.MegaPublic : R.string.MegaPrivate).toLowerCase());
+                        subtitleView.setText(getString(isPublic ? R.string.MegaPublic : R.string.MegaPrivate).toLowerCase());
                     }
                 }
             } else {
-                subtitleView.setText(LocaleController.getString(R.string.Online));
+                subtitleView.setText(getString(R.string.Online));
             }
 
             setWillNotDraw(false);
@@ -2313,6 +3430,12 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             invalidate();
         }
 
+        public void setForum(boolean forum) {
+            if (isForum != forum) {
+                invalidate();
+            }
+            isForum = forum;
+        }
         @Override
         protected void onAttachedToWindow() {
             super.onAttachedToWindow();
@@ -2331,14 +3454,24 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             return Theme.getColor(key, resourcesProvider);
         }
 
-        private int lastColorId = -1;
+        private MessagesController.PeerColor peerColor;
         public void setColor(int colorId, boolean animated) {
             MessagesController.PeerColors peerColors = MessagesController.getInstance(currentAccount).profilePeerColors;
-            MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(lastColorId = colorId);
+            MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(colorId);
+            setColor(peerColor, animated);
+        }
+
+        public void setColor(MessagesController.PeerColor peerColor, boolean animated) {
+            this.peerColor = peerColor;
             final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
             if (peerColor != null) {
-                emoji.setColor(adaptProfileEmojiColor(peerColor.getBgColor1(isDark)));
-                statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getColor(1, resourcesProvider), peerColor.hasColor6(isDark) ? peerColor.getColor(4, resourcesProvider) : peerColor.getColor(2, resourcesProvider), .5f));
+                if (peerColor.patternColor != 0) {
+                    emoji.setColor(peerColor.patternColor);
+                } else {
+                    emoji.setColor(adaptProfileEmojiColor(peerColor.getBgColor1(isDark)));
+                }
+                statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getStoryColor1(Theme.isCurrentThemeDark()), 0xFFFFFFFF, 0.25f));
+                botVerificationEmoji.setColor(ColorUtils.blendARGB(peerColor.getStoryColor1(Theme.isCurrentThemeDark()), 0xFFFFFFFF, 0.25f));
                 final int accentColor = ColorUtils.blendARGB(peerColor.getStoryColor1(isDark), peerColor.getStoryColor2(isDark), .5f);
                 if (!Theme.hasHue(getThemedColor(Theme.key_actionBarDefault))) {
                     subtitleView.setTextColor(accentColor);
@@ -2347,7 +3480,6 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                 }
                 titleView.setTextColor(Color.WHITE);
             } else {
-                final int emojiColor;
                 if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) > .8f) {
                     emoji.setColor(getThemedColor(Theme.key_windowBackgroundWhiteBlueText));
                 } else if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) < .2f) {
@@ -2356,25 +3488,89 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
                     emoji.setColor(adaptProfileEmojiColor(getThemedColor(Theme.key_actionBarDefault)));
                 }
                 statusEmoji.setColor(Theme.getColor(Theme.key_profile_verifiedBackground, resourcesProvider));
+                botVerificationEmoji.setColor(Theme.getColor(Theme.key_profile_verifiedBackground, resourcesProvider));
                 subtitleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultSubtitle));
                 titleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
             }
+            statusColorSource = 0;
 
-            storyGradient.setColorId(colorId, animated);
+            storyGradient.setColor(peerColor, animated);
             invalidate();
         }
 
-        public void setEmoji(long docId, boolean animated) {
+        // 0: status emoji color last set by setColor, 1: by setEmoji, 2: by setStatusEmoji
+        private int statusColorSource;
+
+        @Override
+        public void updateColors() {
+            try {
+                if (emoji == null || statusEmoji == null || botVerificationEmoji == null || titleView == null || subtitleView == null) {
+                    return;
+                }
+                final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
+                if (peerColor != null) {
+                    if (peerColor.patternColor != 0) {
+                        emoji.setColor(peerColor.patternColor);
+                    } else {
+                        emoji.setColor(adaptProfileEmojiColor(peerColor.getBgColor1(isDark)));
+                    }
+                    botVerificationEmoji.setColor(ColorUtils.blendARGB(peerColor.getStoryColor1(Theme.isCurrentThemeDark()), 0xFFFFFFFF, 0.25f));
+                    if (statusColorSource == 1) {
+                        statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getColor(1, resourcesProvider), peerColor.hasColor6(isDark) ? peerColor.getColor(4, resourcesProvider) : peerColor.getColor(2, resourcesProvider), .5f));
+                    } else if (statusColorSource == 2) {
+                        statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getColor2(isDark), peerColor.hasColor6(isDark) ? peerColor.getColor5(isDark) : peerColor.getColor3(isDark), .5f));
+                    } else {
+                        statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getStoryColor1(Theme.isCurrentThemeDark()), 0xFFFFFFFF, 0.25f));
+                    }
+                    final int accentColor = ColorUtils.blendARGB(peerColor.getStoryColor1(isDark), peerColor.getStoryColor2(isDark), .5f);
+                    if (!Theme.hasHue(getThemedColor(Theme.key_actionBarDefault))) {
+                        subtitleView.setTextColor(accentColor);
+                    } else {
+                        subtitleView.setTextColor(Theme.changeColorAccent(getThemedColor(Theme.key_actionBarDefault), accentColor, getThemedColor(Theme.key_avatar_subtitleInProfileBlue), isDark, accentColor));
+                    }
+                    titleView.setTextColor(Color.WHITE);
+                } else {
+                    if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) > .8f) {
+                        emoji.setColor(getThemedColor(Theme.key_windowBackgroundWhiteBlueText));
+                    } else if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) < .2f) {
+                        emoji.setColor(Theme.multAlpha(getThemedColor(Theme.key_actionBarDefaultTitle), .5f));
+                    } else {
+                        emoji.setColor(adaptProfileEmojiColor(getThemedColor(Theme.key_actionBarDefault)));
+                    }
+                    statusEmoji.setColor(getThemedColor(Theme.key_profile_verifiedBackground));
+                    botVerificationEmoji.setColor(getThemedColor(Theme.key_profile_verifiedBackground));
+                    subtitleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultSubtitle));
+                    titleView.setTextColor(getThemedColor(Theme.key_actionBarDefaultTitle));
+                }
+                invalidate();
+            } catch (Exception e) {
+                FileLog.e(e);
+            }
+        }
+
+        @Override
+        public void addColorKeys(HashSet<Integer> colors) {
+            colors.add(Theme.key_actionBarDefault);
+            colors.add(Theme.key_actionBarDefaultTitle);
+            colors.add(Theme.key_actionBarDefaultSubtitle);
+            colors.add(Theme.key_windowBackgroundWhiteBlueText);
+            colors.add(Theme.key_profile_verifiedBackground);
+            colors.add(Theme.key_avatar_subtitleInProfileBlue);
+        }
+
+        public void setEmoji(long docId, boolean isCollectible, boolean animated) {
             if (docId == 0) {
                 emoji.set((Drawable) null, animated);
             } else {
                 emoji.set(docId, animated);
             }
-            MessagesController.PeerColors peerColors = MessagesController.getInstance(currentAccount).profilePeerColors;
-            MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(lastColorId);
             final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
             if (peerColor != null) {
-                emoji.setColor(adaptProfileEmojiColor(peerColor.getBgColor1(isDark)));
+                if (peerColor.patternColor != 0) {
+                    emoji.setColor(peerColor.patternColor);
+                } else {
+                    emoji.setColor(adaptProfileEmojiColor(peerColor.getBgColor1(isDark)));
+                }
             } else if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) > .8f) {
                 emoji.setColor(getThemedColor(Theme.key_windowBackgroundWhiteBlueText));
             } else if (AndroidUtilities.computePerceivedBrightness(getThemedColor(Theme.key_actionBarDefault)) < .2f) {
@@ -2387,34 +3583,60 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             } else {
                 statusEmoji.setColor(Theme.getColor(Theme.key_profile_verifiedBackground, resourcesProvider));
             }
+            statusColorSource = 1;
+            isEmojiCollectible = isCollectible;
+            if (!animated) {
+                emojiCollectible.force(isEmojiCollectible);
+            }
+            invalidate();
         }
 
-        public void setStatusEmoji(long docId, boolean animated) {
+        public void setStatusEmoji(long docId, boolean isCollectible, boolean animated) {
             statusEmoji.set(docId, animated);
-            MessagesController.PeerColors peerColors = MessagesController.getInstance(currentAccount).profilePeerColors;
-            MessagesController.PeerColor peerColor = peerColors == null ? null : peerColors.getColor(lastColorId);
+            statusEmoji.setParticles(isCollectible, animated);
             final boolean isDark = resourcesProvider != null ? resourcesProvider.isDark() : Theme.isCurrentThemeDark();
             if (peerColor != null) {
                 statusEmoji.setColor(ColorUtils.blendARGB(peerColor.getColor2(isDark), peerColor.hasColor6(isDark) ? peerColor.getColor5(isDark) : peerColor.getColor3(isDark), .5f));
             } else {
                 statusEmoji.setColor(Theme.getColor(Theme.key_profile_verifiedBackground, resourcesProvider));
             }
+            statusColorSource = 2;
         }
 
         private final RectF rectF = new RectF();
         @Override
         protected void dispatchDraw(Canvas canvas) {
-            rectF.set(dp(20.33f), getHeight() - dp(25.33f + 53.33f), dp(20.33f) + dp(53.33f), getHeight() - dp(25.33f));
+            rectF.set(
+                    (getWidth() - dp(86)) / 2f,
+                    getHeight() - dp(82 + 86),
+                    (getWidth() + dp(86)) / 2f,
+                    getHeight() - dp(82)
+            );
+
+            StarGiftPatterns.drawProfileAnimatedPattern(
+                    canvas,
+                    emoji,
+                    getWidth(),
+                    getHeight(),
+                    1.0f,
+                    rectF,
+                    1.0f
+            );
+
+            imageReceiver.setRoundRadius(isForum ? dp(18) : dp(54));
             imageReceiver.setImageCoords(rectF);
             imageReceiver.draw(canvas);
 
-            canvas.drawCircle(rectF.centerX(), rectF.centerY(), rectF.width() / 2f + dp(4), storyGradient.getPaint(rectF));
-
-            drawProfileIconPattern(getWidth() - dp(46), getHeight(), 1f, (x, y, sz, alpha) -> {
-                emoji.setAlpha((int) (0xFF * alpha));
-                emoji.setBounds((int) (x - sz * .45f), (int) (y - sz * .45f), (int) (x + sz * .45f), (int) (y + sz * .45f));
-                emoji.draw(canvas);
-            });
+            final float r = rectF.width() / 2f + dp(4);
+            final float rr = dp(isForum ? 22 : 58);
+            canvas.drawRoundRect(
+                    rectF.centerX() - r,
+                    rectF.centerY() - r,
+                    rectF.centerX() + r,
+                    rectF.centerY() + r,
+                    rr, rr,
+                    storyGradient.getPaint(rectF)
+            );
 
             super.dispatchDraw(canvas);
         }
@@ -2423,51 +3645,6 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
     public static int adaptProfileEmojiColor(int color) {
         final boolean isDark = AndroidUtilities.computePerceivedBrightness(color) < .2f;
         return Theme.adaptHSV(color, +.5f, isDark ? +.28f : -.28f);
-    }
-
-    public static final float PARTICLE_SIZE_DP = 24;
-    public static final int PARTICLES_COUNT = 15;
-    public static final float GOLDEN_RATIO_ANGLE = 139f;
-    public static final float FILL_SCALE = 1;
-
-    public static void drawSunflowerPattern(float cx, float cy, Utilities.Callback3<Float, Float, Float> draw) {
-        drawSunflowerPattern(PARTICLES_COUNT, cx, cy, 30, dp(PARTICLE_SIZE_DP) * .7f, 1.4f, GOLDEN_RATIO_ANGLE, draw);
-    }
-
-    public static void drawSunflowerPattern(int count, float cx, float cy, float anglestart, float scale, float scale2, float angle, Utilities.Callback3<Float, Float, Float> draw) {
-        for (int i = 1; i <= count; ++i) {
-            final float a = anglestart + i * angle;
-            final float r = (float) (Math.sqrt(i * scale2) * scale);
-            final float x = (float) (cx + Math.cos(a / 180f * Math.PI) * r) + (i == 3 ? .3f * scale : 0);
-            final float y = (float) (cy + Math.sin(a / 180f * Math.PI) * r) + (i == 3 ? -.5f * scale : 0);
-            draw.run(x, y, (float) Math.sqrt(1f - (float) i / count));
-        }
-    }
-
-    private final static float[] particles = {
-        -18, -24.66f, 24, .4f,
-        5.33f, -53, 28, .38f,
-        -4, -86, 19, .18f,
-        31, -30, 21, .35f,
-        12, -3, 24, .18f,
-        30, -73, 19, .3f,
-        43, -101, 16, .1f,
-        -50, 1.33f, 20, .22f,
-        -58, -33, 24, .22f,
-        -35, -62, 25, .22f,
-        -59, -88, 19, .18f,
-        -86, -61, 19, .1f,
-        -90, -14.33f, 19.66f, .18f
-    };
-    public static void drawProfileIconPattern(float cx, float cy, float scale, Utilities.Callback4<Float, Float, Float, Float> draw) {
-        for (int i = 0; i < particles.length; i += 4) {
-            draw.run(
-                cx + dp(particles[i]) * scale,
-                cy + dp(particles[i + 1]) * scale,
-                dpf2(particles[i + 2]),
-                particles[i + 3]
-            );
-        }
     }
 
     private View changeDayNightView;
@@ -2570,7 +3747,7 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
 
     public void updateLightStatusBar() {
         if (getParentActivity() == null) return;
-        AndroidUtilities.setLightStatusBar(getParentActivity().getWindow(), isLightStatusBar());
+        AndroidUtilities.setLightStatusBar(getParentActivity(), isLightStatusBar());
     }
 
     private boolean forceDark = isDark;
@@ -2591,6 +3768,440 @@ public class PeerColorActivity extends BaseFragment implements NotificationCente
             if (dayNightItem != null) {
                 dayNightItem.invalidate();
             }
+        }
+    }
+
+    public static class GiftCell extends FrameLayout {
+
+        public long id;
+        public TL_stars.starGiftAttributeBackdrop backdrop;
+        public TL_stars.starGiftAttributePattern pattern;
+
+        public final FrameLayout card;
+        public final GiftSheet.CardBackground cardBackground;
+        public final BackupImageView imageView;
+
+        @Nullable
+        private final GiftSheet.Ribbon ribbon;
+
+        public GiftCell(Context context, boolean withRibbon, Theme.ResourcesProvider resourcesProvider) {
+            super(context);
+
+            card = new FrameLayout(context);
+            card.setBackground(cardBackground = new GiftSheet.CardBackground(card, resourcesProvider, false));
+            addView(card, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
+            ScaleStateListAnimator.apply(card, 0.025f, 1.25f);
+
+            imageView = new BackupImageView(context);
+            card.addView(imageView, LayoutHelper.createFrame(80, 80, Gravity.CENTER, 0, 12, 0, 12));
+
+            if (withRibbon) {
+                ribbon = new GiftSheet.Ribbon(context);
+                addView(ribbon, LayoutHelper.createFrame(LayoutHelper.WRAP_CONTENT, LayoutHelper.WRAP_CONTENT, Gravity.RIGHT | Gravity.TOP, 0, 2, 1, 0));
+            } else {
+                ribbon = null;
+            }
+        }
+
+        public void set(int index, TL_stars.TL_starGiftUnique gift) {
+            id = gift.id;
+            final boolean center = index % 3 == 1;
+            setPadding(center ? dp(4) : 0, 0, center ? dp(4) : 0, 0);
+
+            setSticker(gift.getDocument(), gift);
+
+            backdrop = findAttribute(gift.attributes, TL_stars.starGiftAttributeBackdrop.class);
+            pattern = findAttribute(gift.attributes, TL_stars.starGiftAttributePattern.class);
+
+            cardBackground.setBackdrop(backdrop);
+            cardBackground.setPattern(pattern);
+        }
+
+        public void set(int index, TL_stars.SavedStarGift g) {
+            id = g.gift.id;
+            final boolean center = index % 3 == 1;
+            setPadding(center ? dp(4) : 0, 0, center ? dp(4) : 0, 0);
+
+            setSticker(g.gift.getDocument(), g.gift);
+
+            backdrop = findAttribute(g.gift.attributes, TL_stars.starGiftAttributeBackdrop.class);
+            pattern = findAttribute(g.gift.attributes, TL_stars.starGiftAttributePattern.class);
+
+            cardBackground.setBackdrop(backdrop);
+            cardBackground.setPattern(pattern);
+
+            if (ribbon != null) {
+                ribbon.setBackdrop(backdrop);
+                ribbon.setText(9, "#" + LocaleController.formatNumber(g.gift.num, ','), false);
+            }
+        }
+
+        public long getGiftId() {
+            return id;
+        }
+
+        public void setSelected(boolean selected, boolean animated) {
+            cardBackground.setSelected(selected, animated);
+            final float s = selected ? 0.9f : 1.0f;
+            if (animated) {
+                imageView.animate().scaleX(s).scaleY(s).start();
+            } else {
+                imageView.animate().cancel();
+                imageView.setScaleX(s);
+                imageView.setScaleY(s);
+            }
+        }
+
+        private TLRPC.Document lastDocument;
+        private long lastDocumentId;
+        private void setSticker(TLRPC.Document document, Object parentObject) {
+            if (document == null) {
+                imageView.clearImage();
+                lastDocument = null;
+                lastDocumentId = 0;
+                return;
+            }
+
+            if (lastDocument == document) return;
+            lastDocument = document;
+            lastDocumentId = document.id;
+
+            final TLRPC.PhotoSize photoSize = FileLoader.getClosestPhotoSizeWithSize(document.thumbs, dp(100));
+            final SvgHelper.SvgDrawable svgThumb = DocumentObject.getSvgThumb(document, Theme.key_windowBackgroundGray, 0.3f);
+
+            imageView.setImage(
+                    ImageLocation.getForDocument(document), "100_100",
+                    ImageLocation.getForDocument(photoSize, document), "100_100",
+                    svgThumb,
+                    parentObject
+            );
+        }
+
+        public static class Factory extends UItem.UItemFactory<GiftCell> {
+            static { setup(new Factory()); }
+
+            @Override
+            public GiftCell createView(Context context, RecyclerListView listView, int currentAccount, int classGuid, Theme.ResourcesProvider resourcesProvider) {
+                return new GiftCell(context, true, resourcesProvider);
+            }
+
+            @Override
+            public void bindView(View view, UItem item, boolean divider, UniversalAdapter adapter, UniversalRecyclerView listView) {
+                ((GiftCell) view).set(-1, (TL_stars.SavedStarGift) item.object);
+                ((GiftCell) view).setSelected(item.checked, false);
+            }
+
+            public static UItem asGiftCell(TL_stars.SavedStarGift gift) {
+                UItem item = UItem.ofFactory(Factory.class);
+                item.object = gift;
+                return item;
+            }
+        }
+    }
+
+    public static boolean eq(TLRPC.EmojiStatus emoji_status, TLRPC.TL_emojiStatusCollectible b) {
+        if (b == emoji_status) return true;
+        if ((b != null) != (emoji_status instanceof TLRPC.TL_emojiStatusCollectible)) return false;
+        if (b == null || !(emoji_status instanceof TLRPC.TL_emojiStatusCollectible)) return false;
+        final TLRPC.TL_emojiStatusCollectible a = (TLRPC.TL_emojiStatusCollectible) emoji_status;
+        return a.collectible_id == b.collectible_id;
+    }
+
+    public static boolean eq(TLRPC.TL_peerColorCollectible a, TLRPC.TL_peerColorCollectible b) {
+        if (a == b) return true;
+        if (a == null && b == null) return true;
+        if (a == null || b == null) return false;
+        return a.collectible_id == b.collectible_id;
+    }
+
+
+    private void checkColors() {
+        iBlur3SourceButtonColor.setColor(getThemedColor(Theme.key_windowBackgroundWhite));
+        buttonContainerInternal.invalidate();
+        buttonContainer.invalidate();
+        namePage.messagesCellFade.invalidate();
+        namePage.messagesCellFade2.invalidate();
+        profilePage.messagesCellFade.invalidate();
+        namePage.listView.invalidate();
+        profilePage.listView.invalidate();
+        ((BlurredBackgroundDrawable) buttonContainerInternal.getBackground()).updateColors();
+        checkPagesColors();
+        for (BlurredBackgroundDrawable d : glassAttachedDrawables) {
+            d.updateColors();
+        }
+    }
+
+
+    private class Tabs extends FrameLayout {
+
+        private final RecyclerListView listView;
+        private final LinearLayoutManager layoutManager;
+        private final RecyclerView.Adapter<RecyclerView.ViewHolder> adapter;
+        private int selected;
+        private final AnimatedFloat animatedSelected;
+        private final ArrayList<CharSequence> tabs = new ArrayList<>();
+        private Utilities.Callback<Integer> whenTabSelected;
+
+        private final RectF flooredRect = new RectF(), ceiledRect = new RectF();
+        private final RectF selectedRect = new RectF();
+        private final Paint backgroundPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+        private final Paint selectedPaint = new Paint(Paint.ANTI_ALIAS_FLAG);
+
+        private int selectedColor;
+        private int textColor;
+        private int selectedTextColor;
+        private Runnable externalInvalidate;
+
+        public Tabs(Context context, Theme.ResourcesProvider resourcesProvider) {
+            super(context);
+
+            listView = new RecyclerListView(context, resourcesProvider) {
+                @Override
+                public void invalidate() {
+                    super.invalidate();
+                    if (externalInvalidate != null) {
+                        externalInvalidate.run();
+                    }
+                }
+
+                @Override
+                protected void dispatchDraw(@NonNull Canvas canvas) {
+                    if (!updateSelectedRect()) {
+                        super.dispatchDraw(canvas);
+                        return;
+                    }
+
+                    selectedPaint.setColor(selectedColor);
+                    final float radius = selectedRect.height() / 2f;
+                    canvas.drawRoundRect(selectedRect, radius, radius, selectedPaint);
+                    super.dispatchDraw(canvas);
+                }
+            };
+            listView.setClipToPadding(false);
+            listView.setClipChildren(false);
+            listView.setPadding(dp(4), dp(4), dp(4), dp(4));
+            listView.setOverScrollMode(OVER_SCROLL_NEVER);
+            listView.setHorizontalScrollBarEnabled(false);
+            listView.setItemAnimator(null);
+
+            layoutManager = new LinearLayoutManager(context, LinearLayoutManager.HORIZONTAL, false);
+            listView.setLayoutManager(layoutManager);
+
+            adapter = new RecyclerView.Adapter<RecyclerView.ViewHolder>() {
+                @NonNull
+                @Override
+                public RecyclerView.ViewHolder onCreateViewHolder(@NonNull ViewGroup parent, int viewType) {
+                    final LinkSpanDrawable.LinksTextView tab = new LinkSpanDrawable.LinksTextView(parent.getContext());
+                    tab.setGravity(Gravity.CENTER);
+                    tab.setTypeface(AndroidUtilities.bold());
+                    tab.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
+                    tab.setPadding(dp(12), 0, dp(12), 0);
+                    tab.setEllipsize(TextUtils.TruncateAt.END);
+                    tab.setSingleLine();
+                    tab.setMaxLines(1);
+                    tab.setLayoutParams(new RecyclerView.LayoutParams(LayoutHelper.WRAP_CONTENT, dp(28)));
+                    ScaleStateListAnimator.apply(tab, 0.075f, 1.4f);
+                    return new RecyclerListView.Holder(tab);
+                }
+
+                @Override
+                public void onBindViewHolder(@NonNull RecyclerView.ViewHolder holder, int position) {
+                    final TextView tab = (TextView) holder.itemView;
+                    tab.setText(tabs.get(position));
+                    tab.setTextColor(position == selected ? selectedTextColor : textColor);
+                }
+
+                @Override
+                public int getItemCount() {
+                    return tabs.size();
+                }
+            };
+            listView.setAdapter(adapter);
+            listView.setOnItemClickListener((view, position) -> {
+                setSelected(position, true);
+                if (whenTabSelected != null) {
+                    whenTabSelected.run(position);
+                }
+            });
+            addView(listView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
+
+            setHorizontalScrollBarEnabled(false);
+            setClipToPadding(false);
+            setClipChildren(false);
+
+            animatedSelected = new AnimatedFloat(listView, 0, 320, CubicBezierInterpolator.EASE_OUT_QUINT);
+        }
+
+        private Drawable backgroundDrawableGlass;
+        private Drawable backgroundDrawableNoGlass;
+        private boolean drawInList;
+
+        public void setDrawInList(boolean drawInList) {
+            if (this.drawInList != drawInList) {
+                this.drawInList = drawInList;
+                invalidate();
+            }
+        }
+
+        private Path clipPath = new Path();
+
+        @Override
+        protected void onSizeChanged(int w, int h, int oldw, int oldh) {
+            super.onSizeChanged(w, h, oldw, oldh);
+            final int p = dp(3);
+            clipPath.rewind();
+            clipPath.addRoundRect(p, p, w - p, h - p, dp(18) - p, dp(18) - p, Path.Direction.CW);
+        }
+
+        @Override
+        protected void dispatchDraw(@NonNull Canvas canvas) {
+            DrawableUtils.setBoundsIncreasePadding(backgroundDrawableGlass, 0, 0, getWidth(), getHeight());
+            DrawableUtils.setBoundsIncreasePadding(backgroundDrawableNoGlass, 0, 0, getWidth(), getHeight());
+            (drawInList ? backgroundDrawableNoGlass : backgroundDrawableGlass).draw(canvas);
+
+            canvas.save();
+            // canvas.drawPath(clipPath, backgroundPaint);
+            canvas.clipPath(clipPath);
+            super.dispatchDraw(canvas);
+            canvas.restore();
+        }
+
+        private boolean updateSelectedRect() {
+            if (tabs.isEmpty()) {
+                return false;
+            }
+
+            final float selected = animatedSelected.set(this.selected);
+            final int flooredIndex = Utilities.clamp((int) Math.floor(selected), tabs.size() - 1, 0);
+            final int ceiledIndex = Utilities.clamp((int) Math.ceil(selected), tabs.size() - 1, 0);
+            final View flooredView = layoutManager.findViewByPosition(flooredIndex);
+            final View ceiledView = layoutManager.findViewByPosition(ceiledIndex);
+
+            if (flooredView == null && ceiledView == null) {
+                return false;
+            }
+
+            setBounds(flooredRect, flooredView != null ? flooredView : ceiledView);
+            setBounds(ceiledRect, ceiledView != null ? ceiledView : flooredView);
+            lerp(flooredRect, ceiledRect, selected - flooredIndex, selectedRect);
+            return true;
+        }
+
+        private void setBounds(RectF rect, View view) {
+            rect.set(view.getLeft(), view.getTop(), view.getRight(), view.getBottom());
+        }
+
+        private void updateTabTextColor(int position) {
+            final View view = layoutManager.findViewByPosition(position);
+            if (view instanceof TextView) {
+                ((TextView) view).setTextColor(position == selected ? selectedTextColor : textColor);
+                view.invalidate();
+            }
+        }
+
+        private void updateVisibleTabTextColors() {
+            for (int i = 0; i < listView.getChildCount(); i++) {
+                final View view = listView.getChildAt(i);
+                final int position = listView.getChildAdapterPosition(view);
+                if (position != RecyclerView.NO_POSITION && view instanceof TextView) {
+                    ((TextView) view).setTextColor(position == selected ? selectedTextColor : textColor);
+                    view.invalidate();
+                }
+            }
+        }
+
+        public void setSelected(int selected, boolean animated) {
+            final int previousSelected = this.selected;
+            this.selected = selected;
+            if (!animated) {
+                animatedSelected.set(selected, true);
+            }
+            updateTabTextColor(previousSelected);
+            if (selected != previousSelected) {
+                updateTabTextColor(selected);
+            }
+            if (!tabs.isEmpty()) {
+                final int position = Utilities.clamp(selected, tabs.size() - 1, 0);
+                if (animated) {
+                    listView.smoothScrollToPosition(position);
+                } else {
+                    listView.scrollToPosition(position);
+                }
+            }
+            listView.invalidate();
+        }
+
+        private int lastId = Integer.MIN_VALUE;
+        public void set(int id, ArrayList<CharSequence> tabs, int selected, Utilities.Callback<Integer> whenTabSelected) {
+            final boolean animated = lastId == id;
+            lastId = id;
+            this.whenTabSelected = whenTabSelected;
+            this.tabs.clear();
+            this.tabs.addAll(tabs);
+            adapter.notifyDataSetChanged();
+            setSelected(selected, animated);
+        }
+
+        @Override
+        protected void onMeasure(int widthMeasureSpec, int heightMeasureSpec) {
+            super.onMeasure(MeasureSpec.makeMeasureSpec(MeasureSpec.getSize(widthMeasureSpec), MeasureSpec.EXACTLY), heightMeasureSpec);
+        }
+
+        public void updateColors() {
+            updateVisibleTabTextColors();
+            listView.invalidate();
+        }
+
+        public void setColors(int backgroundColor, int selectedColor, int textColor, int selectedTextColor) {
+            backgroundPaint.setColor(backgroundColor);
+            this.selectedColor = Theme.multAlpha(selectedTextColor, 0.06f);
+            this.textColor = textColor;
+            this.selectedTextColor = selectedTextColor;
+            updateVisibleTabTextColors();
+            listView.invalidate();
+            invalidate();
+        }
+
+        public void setExternalInvalidate(Runnable externalInvalidate) {
+            this.externalInvalidate = externalInvalidate;
+        }
+    }
+
+    /* * */
+
+    private Insets insets = Insets.NONE;
+
+    @Override
+    public boolean isSupportEdgeToEdge() {
+        return true;
+    }
+
+    @Override
+    public EdgeToEdgeSupportMode getEdgeToEdgeSupportMode() {
+        return EdgeToEdgeSupportMode.FULL;
+    }
+
+    @Override
+    public boolean drawEdgeNavigationBar() {
+        return false;
+    }
+
+    @NonNull
+    private WindowInsetsCompat onApplyWindowInsets(@NonNull View v, @NonNull WindowInsetsCompat insetsCompat) {
+        insets = AndroidUtilities.getDefaultWindowInsets(insetsCompat, false);
+        namePage.listView.setPadding(insets.left, namePage.listView.getPaddingTop(), insets.right, insets.bottom + dp(48 + 12 + 12));
+        profilePage.listView.setPadding(insets.left, profilePage.listView.getPaddingTop(), insets.right, insets.bottom + dp(48 + 12 + 12));
+        buttonContainer.setPadding(insets.left, 0, insets.right, insets.bottom);
+
+        return WindowInsetsCompat.CONSUMED;
+    }
+
+    private final ReferenceList<View> glassAttachedViews = new ReferenceList<>();
+    private final ReferenceList<BlurredBackgroundDrawable> glassAttachedDrawables = new ReferenceList<>();
+
+    private void invalidateAllGlassAttachedViews() {
+        for (View v: glassAttachedViews) {
+            v.invalidate();
         }
     }
 }

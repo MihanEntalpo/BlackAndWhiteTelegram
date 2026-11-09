@@ -18,7 +18,7 @@ import androidx.annotation.NonNull;
 import androidx.annotation.Nullable;
 import androidx.core.graphics.ColorUtils;
 
-import com.google.android.exoplayer2.util.Log;
+
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ImageLoader;
@@ -108,7 +108,7 @@ public class ChatBackgroundDrawable extends Drawable {
                     wallPaper.settings.fourth_background_color
             );
             EmojiThemes.loadWallpaperImage(UserConfig.selectedAccount, wallPaper.id, wallPaper, result -> {
-                motionBackgroundDrawable.setPatternBitmap(wallPaper.settings.intensity, result.second);
+                motionBackgroundDrawable.setPatternBitmap(wallPaper.settings.intensity, result.bitmap);
                 if (parent != null) {
                     parent.invalidate();
                 }
@@ -250,18 +250,22 @@ public class ChatBackgroundDrawable extends Drawable {
             attached = false;
             imageReceiver.onDetachedFromWindow();
         }
+        if (motionBackgroundDrawable != null) {
+            motionBackgroundDrawable.onAttachedToWindow();
+        }
     }
 
     public void onDetachedFromWindow(View view) {
-        if (!attachedViews.contains(view)) {
-            attachedViews.remove(view);
-        }
+        attachedViews.remove(view);
         if (isAttached() && !attached) {
             attached = true;
             imageReceiver.onAttachedToWindow();
         } else if (!isAttached() && attached) {
             attached = false;
             imageReceiver.onDetachedFromWindow();
+        }
+        if (motionBackgroundDrawable != null) {
+            motionBackgroundDrawable.onDetachedFromWindow();
         }
     }
 

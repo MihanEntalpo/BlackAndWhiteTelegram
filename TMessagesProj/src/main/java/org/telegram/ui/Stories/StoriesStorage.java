@@ -4,8 +4,6 @@ import android.text.TextUtils;
 
 import androidx.collection.LongSparseArray;
 
-import com.google.android.exoplayer2.util.Consumer;
-
 import org.telegram.SQLite.SQLiteCursor;
 import org.telegram.SQLite.SQLiteDatabase;
 import org.telegram.SQLite.SQLiteException;
@@ -17,7 +15,9 @@ import org.telegram.messenger.FileLog;
 import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.MessagesStorage;
+import org.telegram.messenger.Timer;
 import org.telegram.messenger.UserConfig;
+import org.telegram.messenger.Utilities;
 import org.telegram.messenger.support.LongSparseIntArray;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.NativeByteBuffer;
@@ -42,13 +42,14 @@ public class StoriesStorage {
 
     }
 
-    public void getAllStories(Consumer<TL_stories.TL_stories_allStories> consumer) {
+    public void getAllStories(Utilities.Callback<TL_stories.TL_stories_allStories> consumer) {
         storage.getStorageQueue().postRunnable(() -> {
             SQLiteDatabase database = storage.getDatabase();
             SQLiteCursor cursor = null;
             ArrayList<TL_stories.PeerStories> userStoriesArray = new ArrayList<>();
             ArrayList<Long> usersToLoad = new ArrayList<>();
             ArrayList<Long> chatsToLoad = new ArrayList<>();
+            final int now = ConnectionsManager.getInstance(currentAccount).getCurrentTime();
             boolean failed = false;
             try {
                 cursor = database.queryFinalized("SELECT dialog_id, max_read FROM stories_counter");
@@ -117,7 +118,7 @@ public class StoriesStorage {
                 }
             }
             if (failed) {
-                AndroidUtilities.runOnUIThread(() -> consumer.accept(null));
+                AndroidUtilities.runOnUIThread(() -> consumer.run(null));
                 return;
             }
             TL_stories.TL_stories_allStories storiesResponse = new TL_stories.TL_stories_allStories();
@@ -137,7 +138,7 @@ public class StoriesStorage {
             }
             Collections.sort(storiesResponse.peer_stories, Comparator.comparingInt(o -> -o.stories.get(o.stories.size() - 1).date));
 
-            AndroidUtilities.runOnUIThread(() -> consumer.accept(storiesResponse));
+            AndroidUtilities.runOnUIThread(() -> consumer.run(storiesResponse));
         });
     }
 
@@ -341,10 +342,10 @@ public class StoriesStorage {
     }
 
 
-    public void getStories(long dialogId, Consumer<TL_stories.PeerStories> consumer) {
+    public void getStories(long dialogId, Utilities.Callback<TL_stories.PeerStories> consumer) {
         storage.getStorageQueue().postRunnable(() -> {
             TL_stories.PeerStories finalUserStories = getStoriesInternal(dialogId);
-            AndroidUtilities.runOnUIThread(() -> consumer.accept(finalUserStories));
+            AndroidUtilities.runOnUIThread(() -> consumer.run(finalUserStories));
         });
     }
 
@@ -555,10 +556,10 @@ public class StoriesStorage {
     }
 
     //storage queue
-    public void fillMessagesWithStories(LongSparseArray<ArrayList<MessageObject>> messagesWithUnknownStories, Runnable runnable, int classGuid) {
-        fillMessagesWithStories(messagesWithUnknownStories, runnable, classGuid, true);
+    public void fillMessagesWithStories(LongSparseArray<ArrayList<MessageObject>> messagesWithUnknownStories, Runnable runnable, int classGuid, Timer timer) {
+        fillMessagesWithStories(messagesWithUnknownStories, runnable, classGuid, true, timer);
     }
-    public void fillMessagesWithStories(LongSparseArray<ArrayList<MessageObject>> messagesWithUnknownStories, Runnable runnable, int classGuid, boolean updateDatabase) {
+    public void fillMessagesWithStories(LongSparseArray<ArrayList<MessageObject>> messagesWithUnknownStories, Runnable runnable, int classGuid, boolean updateDatabase, Timer timer) {
         if (runnable == null) {
             return;
         }
@@ -567,6 +568,7 @@ public class StoriesStorage {
             return;
         }
         ArrayList<MessageObject> updatedMessages = new ArrayList<>();
+        Timer.Task t1 = Timer.start(timer, "fillMessagesWithStories: applying stories for existing array");
         for (int i = 0; i < messagesWithUnknownStories.size(); i++) {
             long dialogId = messagesWithUnknownStories.keyAt(i);
             ArrayList<MessageObject> messageObjects = messagesWithUnknownStories.valueAt(i);
@@ -587,6 +589,7 @@ public class StoriesStorage {
                 }
             }
         }
+        Timer.done(t1);
 
         if (updateDatabase) {
             updateMessagesWithStories(updatedMessages);
@@ -602,7 +605,9 @@ public class StoriesStorage {
                 for (int j = 0; j < messageObjects.size(); j++) {
                     request.id.add(getStoryId(messageObjects.get(j)));
                 }
+                Timer.Task t2 = Timer.start(timer, "fillMessagesWithStories: getStoriesByID did=" + dialogId + " ids=" + TextUtils.join(",", request.id));
                 int reqId = ConnectionsManager.getInstance(currentAccount).sendRequest(request, (response, error) -> {
+                    Timer.done(t2);
                     if (response != null) {
                         TL_stories.TL_stories_stories stories = (TL_stories.TL_stories_stories) response;
                         for (int j = 0; j < messageObjects.size(); j++) {
@@ -626,6 +631,8 @@ public class StoriesStorage {
                                 });
                             }
                         }
+                    } else if (error != null) {
+                        Timer.log(timer, "fillMessagesWithStories: getStoriesByID error " + error.code + " " + error.text);
                     }
                     requestsCount[0]--;
                     if (requestsCount[0] == 0) {
@@ -756,7 +763,7 @@ public class StoriesStorage {
         return storyItem;
     }
 
-    public void getMaxReadIds(Consumer<LongSparseIntArray> consumer) {
+    public void getMaxReadIds(Utilities.Callback<LongSparseIntArray> consumer) {
         storage.getStorageQueue().postRunnable(() -> {
             SQLiteDatabase database = storage.getDatabase();
             SQLiteCursor cursor = null;
@@ -772,7 +779,7 @@ public class StoriesStorage {
                 storage.checkSQLException(e);
             }
             AndroidUtilities.runOnUIThread(() -> {
-                consumer.accept(longSparseIntArray);
+                consumer.run(longSparseIntArray);
             });
         });
     }

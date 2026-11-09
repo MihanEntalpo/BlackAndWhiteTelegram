@@ -8,8 +8,6 @@ import android.animation.AnimatorListenerAdapter;
 import android.content.Context;
 import android.graphics.Canvas;
 import android.graphics.Paint;
-import android.graphics.drawable.ColorDrawable;
-import android.graphics.drawable.Drawable;
 import android.text.TextUtils;
 import android.util.TypedValue;
 import android.view.Gravity;
@@ -28,7 +26,6 @@ import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ChatObject;
 import org.telegram.messenger.ContactsController;
 import org.telegram.messenger.LocaleController;
-import org.telegram.messenger.MessageObject;
 import org.telegram.messenger.MessagesController;
 import org.telegram.messenger.R;
 import org.telegram.messenger.UserConfig;
@@ -38,6 +35,7 @@ import org.telegram.tgnet.TLRPC;
 import org.telegram.tgnet.tl.TL_stories;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.FixedHeightEmptyCell;
 import org.telegram.ui.Cells.ManageChatTextCell;
 import org.telegram.ui.Cells.ShadowSectionCell;
@@ -45,7 +43,6 @@ import org.telegram.ui.Cells.TextCell;
 import org.telegram.ui.Cells.TextInfoPrivacyCell;
 import org.telegram.ui.Charts.view_data.ChartHeaderView;
 import org.telegram.ui.Components.Bulletin;
-import org.telegram.ui.Components.CombinedDrawable;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.LinkActionView;
 import org.telegram.ui.Components.ListView.AdapterWithDiffUtils;
@@ -57,6 +54,8 @@ import org.telegram.ui.Components.Premium.boosts.cells.statistics.GiveawayCell;
 import org.telegram.ui.Components.RLottieImageView;
 import org.telegram.ui.Components.RecyclerListView;
 import org.telegram.ui.Components.ScrollSlidingTextTabStrip;
+import org.telegram.ui.Stars.StarsController;
+import org.telegram.ui.Stars.StarsIntroActivity;
 
 import java.util.ArrayList;
 import java.util.Locale;
@@ -92,8 +91,8 @@ public class ChannelBoostLayout extends FrameLayout {
     private final Theme.ResourcesProvider resourcesProvider;
     private ScrollSlidingTextTabStrip boostsTabs;
 
-    private final ArrayList<TL_stories.TL_boost> boosters = new ArrayList<>();
-    private final ArrayList<TL_stories.TL_boost> gifts = new ArrayList<>();
+    private final ArrayList<TL_stories.Boost> boosters = new ArrayList<>();
+    private final ArrayList<TL_stories.Boost> gifts = new ArrayList<>();
     private boolean hasBoostsNext;
     private int nextBoostRemaining;
     private boolean hasGiftsNext;
@@ -119,25 +118,16 @@ public class ChannelBoostLayout extends FrameLayout {
                     LimitPreviewView limitPreviewView = new LimitPreviewView(getContext(), R.drawable.filled_limit_boost, 0, 0, resourcesProvider);
                     limitPreviewView.isStatistic = true;
                     view = limitPreviewView;
-                    Drawable shadowDrawable = Theme.getThemedDrawable(getContext(), R.drawable.greydivider, Theme.getColor(Theme.key_windowBackgroundGrayShadow, resourcesProvider));
-                    Drawable background = new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundGray));
-                    CombinedDrawable combinedDrawable = new CombinedDrawable(background, shadowDrawable, 0, 0);
-                    combinedDrawable.setFullsize(true);
-
-                    view.setPadding(0, dp(20), 0, AndroidUtilities.dp(20));
-                    view.setBackground(combinedDrawable);
+                    limitPreviewView.setTag(RecyclerListView.TAG_NOT_SECTION);
+                    view.setPadding(0, dp(20), 0, dp(20));
                     limitPreviewView.setBoosts(boostsStatus, false);
                     break;
                 case DIVIDER_TEXT_VIEW_TYPE:
                     view = new TextInfoPrivacyCell(parent.getContext(), 20, resourcesProvider);
-                    shadowDrawable = Theme.getThemedDrawable(getContext(), R.drawable.greydivider, Theme.getColor(Theme.key_windowBackgroundGrayShadow, resourcesProvider));
-                    background = new ColorDrawable(Theme.getColor(Theme.key_windowBackgroundGray));
-                    combinedDrawable = new CombinedDrawable(background, shadowDrawable, 0, 0);
-                    combinedDrawable.setFullsize(true);
-                    view.setBackground(combinedDrawable);
                     break;
                 case DIVIDER_VIEW_TYPE:
                     view = new ShadowSectionCell(parent.getContext(), 12, Theme.getColor(Theme.key_windowBackgroundGray));
+                    ThemeBind.backgroundColor(view, Theme.key_windowBackgroundGray);
                     break;
                 case OVERVIEW_TYPE:
                     view = new StatisticActivity.OverviewCell(getContext());
@@ -215,7 +205,7 @@ public class ChannelBoostLayout extends FrameLayout {
                     TextView textView = new TextView(getContext());
                     textView.setText(LocaleController.getString(isChannel() ? R.string.NoBoostersHint : R.string.NoBoostersGroupHint));
                     textView.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 14);
-                    textView.setTextColor(Theme.getColor(Theme.key_windowBackgroundWhiteGrayText));
+                    ThemeBind.textColor(textView, Theme.key_windowBackgroundWhiteGrayText);
                     textView.setGravity(Gravity.CENTER);
                     frameLayout.addView(textView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.WRAP_CONTENT, 0, 0, 16, 0, 0));
                     view = frameLayout;
@@ -228,7 +218,7 @@ public class ChannelBoostLayout extends FrameLayout {
                         }
                     };
                     actionCell.setColors(Theme.key_windowBackgroundWhiteBlueIcon, Theme.key_windowBackgroundWhiteBlueButton);
-                    // actionCell.setText(LocaleController.getString("ShowMore", R.string.ShowMore), null, R.drawable.arrow_more, false);
+                    // actionCell.setText(LocaleController.getString(R.string.ShowMore), null, R.drawable.arrow_more, false);
                     view = actionCell;
                     break;
                 default:
@@ -252,17 +242,17 @@ public class ChannelBoostLayout extends FrameLayout {
             } else if (holder.getItemViewType() == OVERVIEW_TYPE) {
                 StatisticActivity.OverviewCell overviewCell = (StatisticActivity.OverviewCell) holder.itemView;
 
-                overviewCell.setData(0, Integer.toString(boostsStatus.level), null, LocaleController.getString("BoostsLevel2", R.string.BoostsLevel2));
+                overviewCell.setData(0, Integer.toString(boostsStatus.level), null, LocaleController.getString(R.string.BoostsLevel2));
                 if (boostsStatus.premium_audience != null && boostsStatus.premium_audience.total != 0) {
                     float percent = (((float) boostsStatus.premium_audience.part / (float) boostsStatus.premium_audience.total) * 100f);
-                    overviewCell.setData(1, "~" + (int) boostsStatus.premium_audience.part, String.format(Locale.US, "%.1f", percent) + "%", LocaleController.getString(isChannel() ? R.string.PremiumSubscribers : R.string.PremiumMembers));
+                    overviewCell.setData(1, "≈" + (int) boostsStatus.premium_audience.part, String.format(Locale.US, "%.1f", percent) + "%", LocaleController.getString(isChannel() ? R.string.PremiumSubscribers : R.string.PremiumMembers));
                 } else {
-                    overviewCell.setData(1, "~0", "0%", LocaleController.getString(isChannel() ? R.string.PremiumSubscribers : R.string.PremiumMembers));
+                    overviewCell.setData(1, "≈0", "0%", LocaleController.getString(isChannel() ? R.string.PremiumSubscribers : R.string.PremiumMembers));
                 }
-                overviewCell.setData(2, String.valueOf(boostsStatus.boosts), null, LocaleController.getString("BoostsExisting", R.string.BoostsExisting));
-                overviewCell.setData(3, String.valueOf(Math.max(0, boostsStatus.next_level_boosts - boostsStatus.boosts)), null, LocaleController.getString("BoostsToLevel", R.string.BoostsToLevel));
+                overviewCell.setData(2, String.valueOf(boostsStatus.boosts), null, LocaleController.getString(R.string.BoostsExisting));
+                overviewCell.setData(3, String.valueOf(Math.max(0, boostsStatus.next_level_boosts - boostsStatus.boosts)), null, LocaleController.getString(R.string.BoostsToLevel));
             } else if (holder.getItemViewType() == USER_VIEW_TYPE) {
-                TL_stories.TL_boost booster = items.get(position).booster;
+                TL_stories.Boost booster = items.get(position).booster;
                 TLRPC.User user = MessagesController.getInstance(currentAccount).getUser(booster.user_id);
                 GiftedUserCell userCell = (GiftedUserCell) holder.itemView;
                 String str = booster.multiplier > 1
@@ -286,11 +276,18 @@ public class ChannelBoostLayout extends FrameLayout {
                 linkActionView.setLink(items.get(position).title);
             } else if (holder.getItemViewType() == SHOW_PREPARED_GIVE_AWAY) {
                 ItemInternal item = items.get(position);
-                TL_stories.TL_prepaidGiveaway prepaidGiveaway = item.prepaidGiveaway;
+                TL_stories.PrepaidGiveaway prepaidGiveaway = item.prepaidGiveaway;
                 GiveawayCell giveawayCell = (GiveawayCell) holder.itemView;
-                String name = LocaleController.formatPluralString("BoostingTelegramPremiumCountPlural", prepaidGiveaway.quantity);
-                String info = LocaleController.formatPluralString("BoostingSubscriptionsCountPlural", prepaidGiveaway.quantity, LocaleController.formatPluralString("PrepaidGiveawayMonths", prepaidGiveaway.months));
-                giveawayCell.setData(prepaidGiveaway, name, info, 0, !item.isLast);
+                if (prepaidGiveaway instanceof TL_stories.TL_prepaidGiveaway) {
+                    String name = LocaleController.formatPluralString("BoostingTelegramPremiumCountPlural", prepaidGiveaway.quantity);
+                    String info = LocaleController.formatPluralString("BoostingSubscriptionsCountPlural", prepaidGiveaway.quantity, LocaleController.formatPluralString("PrepaidGiveawayMonths", ((TL_stories.TL_prepaidGiveaway) prepaidGiveaway).months));
+                    giveawayCell.setData(prepaidGiveaway, name, info, 0, !item.isLast);
+                } else if (prepaidGiveaway instanceof TL_stories.TL_prepaidStarsGiveaway) {
+                    TL_stories.TL_prepaidStarsGiveaway starsGiveaway = (TL_stories.TL_prepaidStarsGiveaway) prepaidGiveaway;
+                    String name = LocaleController.formatPluralStringComma("BoostingStarsCountPlural", (int) starsGiveaway.stars);
+                    String info = LocaleController.formatPluralString("AmongWinners", starsGiveaway.quantity);
+                    giveawayCell.setData(prepaidGiveaway, name, info, 0, !item.isLast);
+                }
                 giveawayCell.setImage(prepaidGiveaway);
                 giveawayCell.setAvatarPadding(5);
             } else if (holder.getItemViewType() == HEADER_VIEW_TYPE_TABS) {
@@ -319,7 +316,7 @@ public class ChannelBoostLayout extends FrameLayout {
         }
     };
 
-    RecyclerListView listView;
+    public final RecyclerListView listView;
     boolean usersLoading;
     private LinearLayout progressLayout;
     private TLRPC.Chat currentChat;
@@ -332,22 +329,28 @@ public class ChannelBoostLayout extends FrameLayout {
         this.dialogId = dialogId;
         this.currentChat = MessagesController.getInstance(currentAccount).getChat(-dialogId);
         listView = new RecyclerListView(context);
+        listView.setSections(true);
+        listView.setCaptureSectionsDecoratorAllowed(true);
         listView.setLayoutManager(new LinearLayoutManager(context));
         DefaultItemAnimator defaultItemAnimator = new DefaultItemAnimator();
         defaultItemAnimator.setSupportsChangeAnimations(false);
         defaultItemAnimator.setDelayAnimations(false);
         listView.setItemAnimator(defaultItemAnimator);
+        listView.setClipToPadding(false);
         listView.setOnItemClickListener((view, position) -> {
             if (view instanceof GiftedUserCell) {
                 GiftedUserCell cell = (GiftedUserCell) view;
-                TL_stories.TL_boost boost = cell.getBoost();
-                if (((boost.gift || boost.giveaway) && boost.user_id >= 0) || boost.unclaimed) {
+                TL_stories.Boost boost = cell.getBoost();
+                if (boost.giveaway && boost.stars > 0) {
+                    StarsIntroActivity.showBoostsSheet(context, currentAccount, dialogId, boost, resourcesProvider);
+                } else if (((boost.gift || boost.giveaway) && boost.user_id >= 0) || boost.unclaimed) {
                     TLRPC.TL_payments_checkedGiftCode giftCode = new TLRPC.TL_payments_checkedGiftCode();
                     giftCode.giveaway_msg_id = boost.giveaway_msg_id;
                     giftCode.to_id = boost.user_id;
                     giftCode.from_id = MessagesController.getInstance(UserConfig.selectedAccount).getPeer(-currentChat.id);
                     giftCode.date = boost.date;
                     giftCode.via_giveaway = boost.giveaway;
+                    giftCode.days = (boost.expires - boost.date) / 86400;
                     giftCode.months = (boost.expires - boost.date) / 30 / 86400;
                     if (boost.unclaimed) {
                         giftCode.to_id = NO_USER_ID;
@@ -359,7 +362,7 @@ public class ChannelBoostLayout extends FrameLayout {
                 } else if (boost.giveaway && boost.user_id == NO_USER_ID) {
                     final Bulletin.LottieLayout layout = new Bulletin.LottieLayout(fragment.getParentActivity(), fragment.getResourceProvider());
                     layout.setAnimation(R.raw.chats_infotip, 36, 36);
-                    layout.textView.setText(LocaleController.getString("BoostingRecipientWillBeSelected", R.string.BoostingRecipientWillBeSelected));
+                    layout.textView.setText(LocaleController.getString(R.string.BoostingRecipientWillBeSelected));
                     layout.textView.setSingleLine(false);
                     layout.textView.setMaxLines(2);
                     Bulletin.make(fragment, layout, Bulletin.DURATION_LONG).show();
@@ -385,6 +388,8 @@ public class ChannelBoostLayout extends FrameLayout {
         createEmptyView(getContext());
         progressLayout.setAlpha(0);
         progressLayout.animate().alpha(1f).setDuration(200).setStartDelay(500).start();
+
+        StarsController.getInstance(currentAccount).getGiveawayOptions();
     }
 
     private boolean isChannel() {
@@ -396,20 +401,20 @@ public class ChannelBoostLayout extends FrameLayout {
         items.clear();
         if (boostsStatus != null) {
             items.add(new ItemInternal(BOOST_VIEW, false));
-            items.add(new ItemInternal(HEADER_VIEW_TYPE, LocaleController.getString("StatisticOverview", R.string.StatisticOverview)));
+            items.add(new ItemInternal(HEADER_VIEW_TYPE, LocaleController.getString(R.string.StatisticOverview)));
             items.add(new ItemInternal(OVERVIEW_TYPE, false));
             items.add(new ItemInternal(DIVIDER_VIEW_TYPE, false));
 
             if (boostsStatus.prepaid_giveaways.size() > 0) {
-                items.add(new ItemInternal(HEADER_VIEW_TYPE_SMALL, LocaleController.getString("BoostingPreparedGiveaways", R.string.BoostingPreparedGiveaways)));
+                items.add(new ItemInternal(HEADER_VIEW_TYPE_SMALL, LocaleController.getString(R.string.BoostingPreparedGiveaways)));
                 for (int i = 0; i < boostsStatus.prepaid_giveaways.size(); i++) {
-                    TL_stories.TL_prepaidGiveaway prepaidGiveaway = boostsStatus.prepaid_giveaways.get(i);
+                    TL_stories.PrepaidGiveaway prepaidGiveaway = boostsStatus.prepaid_giveaways.get(i);
                     items.add(new ItemInternal(SHOW_PREPARED_GIVE_AWAY, prepaidGiveaway, i == boostsStatus.prepaid_giveaways.size() - 1));
                 }
-                items.add(new ItemInternal(DIVIDER_TEXT_VIEW_TYPE, LocaleController.getString("BoostingSelectPaidGiveaway", R.string.BoostingSelectPaidGiveaway)));
+                items.add(new ItemInternal(DIVIDER_TEXT_VIEW_TYPE, LocaleController.getString(R.string.BoostingSelectPaidGiveaway)));
             }
 
-            items.add(new ItemInternal(HEADER_VIEW_TYPE_TABS, LocaleController.getString("Boosters", R.string.Boosters)));
+            items.add(new ItemInternal(HEADER_VIEW_TYPE_TABS, LocaleController.getString(R.string.Boosters)));
             if (selectedTab == TAB_BOOSTS) {
                 if (boosters.isEmpty()) {
                     items.add(new ItemInternal(NO_USERS_HINT, false));
@@ -442,12 +447,12 @@ public class ChannelBoostLayout extends FrameLayout {
                 }
             }
 
-            items.add(new ItemInternal(HEADER_VIEW_TYPE, LocaleController.getString("LinkForBoosting", R.string.LinkForBoosting)));
+            items.add(new ItemInternal(HEADER_VIEW_TYPE, LocaleController.getString(R.string.LinkForBoosting)));
             items.add(new ItemInternal(LINK_VIEW_TYPE, boostsStatus.boost_url));
             if (MessagesController.getInstance(currentAccount).giveawayGiftsPurchaseAvailable && ChatObject.hasAdminRights(currentChat)) {
                 items.add(new ItemInternal(DIVIDER_TEXT_VIEW_TYPE, LocaleController.getString(isChannel() ? R.string.BoostingShareThisLink : R.string.BoostingShareThisLinkGroup)));
                 items.add(new ItemInternal(SHOW_BOOST_BY_GIFTS, true));
-                items.add(new ItemInternal(DIVIDER_TEXT_VIEW_TYPE, LocaleController.getString(isChannel() ? R.string.BoostingGetMoreBoosts : R.string.BoostingGetMoreBoostsGroup)));
+                items.add(new ItemInternal(DIVIDER_TEXT_VIEW_TYPE, LocaleController.getString(isChannel() ? R.string.BoostingGetMoreBoosts2 : R.string.BoostingGetMoreBoostsGroup)));
             }
         }
         if (animated) {
@@ -529,7 +534,7 @@ public class ChannelBoostLayout extends FrameLayout {
                 lastBoostsOffset = list.next_offset;
                 boosters.addAll(list.boosts);
                 int shownBoosts = 0;
-                for (TL_stories.TL_boost booster : boosters) {
+                for (TL_stories.Boost booster : boosters) {
                     shownBoosts += booster.multiplier > 0 ? booster.multiplier : 1;
                 }
                 nextBoostRemaining = Math.max(0, list.count - shownBoosts);
@@ -560,7 +565,7 @@ public class ChannelBoostLayout extends FrameLayout {
                 lastGiftsOffset = list.next_offset;
                 gifts.addAll(list.boosts);
                 int shownGifts = 0;
-                for (TL_stories.TL_boost booster : gifts) {
+                for (TL_stories.Boost booster : gifts) {
                     shownGifts += booster.multiplier > 0 ? booster.multiplier : 1;
                 }
                 nextGiftsRemaining = Math.max(0, list.count - shownGifts);
@@ -576,8 +581,8 @@ public class ChannelBoostLayout extends FrameLayout {
     private class ItemInternal extends AdapterWithDiffUtils.Item {
 
         String title;
-        TL_stories.TL_boost booster;
-        TL_stories.TL_prepaidGiveaway prepaidGiveaway;
+        TL_stories.Boost booster;
+        TL_stories.PrepaidGiveaway prepaidGiveaway;
         boolean isLast;
         int tab;
 
@@ -586,14 +591,14 @@ public class ChannelBoostLayout extends FrameLayout {
             this.title = title;
         }
 
-        public ItemInternal(int viewType, TL_stories.TL_boost booster, boolean isLast, int tab) {
+        public ItemInternal(int viewType, TL_stories.Boost booster, boolean isLast, int tab) {
             super(viewType, true);
             this.booster = booster;
             this.isLast = isLast;
             this.tab = tab;
         }
 
-        public ItemInternal(int viewType, TL_stories.TL_prepaidGiveaway prepaidGiveaway, boolean isLast) {
+        public ItemInternal(int viewType, TL_stories.PrepaidGiveaway prepaidGiveaway, boolean isLast) {
             super(viewType, true);
             this.prepaidGiveaway = prepaidGiveaway;
             this.isLast = isLast;
@@ -635,17 +640,17 @@ public class ChannelBoostLayout extends FrameLayout {
 
         TextView loadingTitle = new TextView(context);
         loadingTitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 20);
-        loadingTitle.setTypeface(AndroidUtilities.getTypeface("fonts/rmedium.ttf"));
-        loadingTitle.setTextColor(Theme.getColor(Theme.key_player_actionBarTitle));
+        loadingTitle.setTypeface(AndroidUtilities.bold());
+        ThemeBind.textColor(loadingTitle, Theme.key_player_actionBarTitle);
         loadingTitle.setTag(Theme.key_player_actionBarTitle);
-        loadingTitle.setText(LocaleController.getString("LoadingStats", R.string.LoadingStats));
+        loadingTitle.setText(LocaleController.getString(R.string.LoadingStats));
         loadingTitle.setGravity(Gravity.CENTER_HORIZONTAL);
 
         TextView loadingSubtitle = new TextView(context);
         loadingSubtitle.setTextSize(TypedValue.COMPLEX_UNIT_DIP, 15);
-        loadingSubtitle.setTextColor(Theme.getColor(Theme.key_player_actionBarSubtitle));
+        ThemeBind.textColor(loadingSubtitle, Theme.key_player_actionBarSubtitle);
         loadingSubtitle.setTag(Theme.key_player_actionBarSubtitle);
-        loadingSubtitle.setText(LocaleController.getString("LoadingStatsDescription", R.string.LoadingStatsDescription));
+        loadingSubtitle.setText(LocaleController.getString(R.string.LoadingStatsDescription));
         loadingSubtitle.setGravity(Gravity.CENTER_HORIZONTAL);
 
         progressLayout.addView(imageView, LayoutHelper.createLinear(120, 120, Gravity.CENTER_HORIZONTAL, 0, 0, 0, 20));

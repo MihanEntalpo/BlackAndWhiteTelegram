@@ -22,28 +22,42 @@ import android.view.View;
 import androidx.annotation.NonNull;
 
 import org.telegram.messenger.AndroidUtilities;
+import org.telegram.messenger.FileLog;
 import org.telegram.messenger.BotWebViewVibrationEffect;
 import org.telegram.messenger.FileRefController;
 import org.telegram.messenger.LocaleController;
 import org.telegram.messenger.MediaDataController;
 import org.telegram.messenger.R;
-import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.RequestDelegate;
 import org.telegram.tgnet.TLObject;
 import org.telegram.tgnet.TLRPC;
+import org.telegram.tgnet.Vector;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AnimatedEmojiDrawable;
 import org.telegram.ui.Components.AnimatedEmojiSpan;
 import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EmojiPacksAlert;
+import org.telegram.ui.Components.ForegroundColorSpanThemable;
 import org.telegram.ui.Components.LoadingDrawable;
-import org.telegram.ui.Components.StickersAlert;
 import org.telegram.ui.Components.TypefaceSpan;
 
 import java.util.ArrayList;
 
-public class StoryContainsEmojiButton extends View {
+public class StoryContainsEmojiButton extends View implements Theme.Colorable {
+
+    @Override
+    public void updateColors() {
+        try {
+            if (textPaint != null) {
+                textPaint.setColor(Theme.getColor(Theme.key_actionBarDefaultSubmenuItem, resourcesProvider));
+                invalidate();
+            }
+        } catch (Exception e) {
+            FileLog.e(e);
+        }
+    }
 
     private final Theme.ResourcesProvider resourcesProvider;
 
@@ -58,7 +72,7 @@ public class StoryContainsEmojiButton extends View {
 
     private ArrayList<TLRPC.StickerSetCovered> sets;
     private ArrayList<TLRPC.InputStickerSet> inputSets;
-    private TLRPC.Vector vector;
+    private Vector<TLRPC.StickerSetCovered> vector;
     private boolean emoji, stickers;
     private Object parentObject;
     private float loadT;
@@ -74,7 +88,7 @@ public class StoryContainsEmojiButton extends View {
 
         setMinimumWidth(AndroidUtilities.dp(196));
         setPadding(dp(13), dp(8), dp(13), dp(8));
-        setBackground(Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 0, 8));
+        ThemeBind.selectorBackground(this, Theme.createRadSelectorDrawable(Theme.getColor(Theme.key_listSelector, resourcesProvider), 0, 8), null, ThemeBind.of(Theme.key_listSelector), resourcesProvider);
         setClickable(true);
 
         textPaint = new TextPaint(Paint.ANTI_ALIAS_FLAG);
@@ -162,7 +176,7 @@ public class StoryContainsEmojiButton extends View {
     }
 
     private static Object lastRequestParentObject;
-    private static TLRPC.Vector lastResponse;
+    private static Vector<TLRPC.StickerSetCovered> lastResponse;
 
     public void load(int currentAccount, boolean requestStickers, TLObject obj, ArrayList<TLRPC.InputStickerSet> additionalEmojiSets, Object parentObject) {
         final boolean animate[] = new boolean[] { true };
@@ -208,14 +222,14 @@ public class StoryContainsEmojiButton extends View {
                 req.media = inputStickeredMediaDocument;
             }
             final RequestDelegate requestDelegate = (response, error) -> AndroidUtilities.runOnUIThread(() -> {
-                if (response == null) {
+                if (!(response instanceof Vector)) {
                     return;
                 }
-                TLRPC.Vector vector = this.vector = (TLRPC.Vector) response;
+                Vector<TLRPC.StickerSetCovered> vector = this.vector = (Vector<TLRPC.StickerSetCovered>) response;
                 lastRequestParentObject = parentObject;
                 lastResponse = vector;
                 for (int i = 0; i < vector.objects.size(); ++i) {
-                    TLRPC.StickerSetCovered setCovered = (TLRPC.StickerSetCovered) vector.objects.get(i);
+                    TLRPC.StickerSetCovered setCovered = vector.objects.get(i);
                     sets.add(setCovered);
                     if (setCovered.set != null) {
                         inputSets.add(MediaDataController.getInputStickerSet(setCovered.set));
@@ -298,8 +312,8 @@ public class StoryContainsEmojiButton extends View {
             return;
         }
         SpannableString pack = new SpannableString("x " + set.set.title);
-        pack.setSpan(new ForegroundColorSpan(Theme.getColor(Theme.key_chat_messageLinkIn, loadingDrawable.resourcesProvider)), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        pack.setSpan(new TypefaceSpan(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM)), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        pack.setSpan(new ForegroundColorSpanThemable(Theme.key_chat_messageLinkIn, loadingDrawable.resourcesProvider), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        pack.setSpan(new TypefaceSpan(AndroidUtilities.bold()), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         TLRPC.Document document = null;
         ArrayList<TLRPC.Document> documents = set.documents;
         for (int i = 0; i < documents.size(); ++i) {
@@ -330,8 +344,8 @@ public class StoryContainsEmojiButton extends View {
 
     private void set(TLRPC.StickerSetCovered set) {
         SpannableString pack = new SpannableString("x " + set.set.title);
-        pack.setSpan(new ForegroundColorSpan(Theme.getColor(Theme.key_chat_messageLinkIn, loadingDrawable.resourcesProvider)), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
-        pack.setSpan(new TypefaceSpan(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM)), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        pack.setSpan(new ForegroundColorSpanThemable(Theme.key_chat_messageLinkIn, loadingDrawable.resourcesProvider), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        pack.setSpan(new TypefaceSpan(AndroidUtilities.bold()), 0, pack.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
         TLRPC.Document document = set.cover;
         if (document == null && set instanceof TLRPC.TL_stickerSetFullCovered) {
             ArrayList<TLRPC.Document> documents = ((TLRPC.TL_stickerSetFullCovered) set).documents;

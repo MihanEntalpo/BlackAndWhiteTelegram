@@ -25,6 +25,9 @@ public interface INavigationLayout {
     int FORCE_NOT_ATTACH_VIEW = -2;
     int FORCE_ATTACH_VIEW_AS_FIRST = -3;
 
+    boolean isLayersLayout();
+    boolean isRightLayout();
+
     boolean presentFragment(NavigationParams params);
     boolean checkTransitionAnimation();
     boolean addFragmentToStack(BaseFragment fragment, int position);
@@ -41,6 +44,7 @@ public interface INavigationLayout {
     void setFragmentStackChangedListener(Runnable onFragmentStackChanged);
     boolean isTransitionAnimationInProgress();
     void resumeDelayedFragmentAnimation();
+    boolean allowSwipe();
 
     boolean isInPassivePreviewMode();
     void setInBubbleMode(boolean bubbleMode);
@@ -72,19 +76,19 @@ public interface INavigationLayout {
     void startActivityForResult(Intent intent, int requestCode);
 
     // TODO: Migrate them to be out of navigation layout
-    Theme.MessageDrawable getMessageDrawableOutStart();
-    Theme.MessageDrawable getMessageDrawableOutMediaStart();
+    MessageDrawable getMessageDrawableOutStart();
+    MessageDrawable getMessageDrawableOutMediaStart();
 
     // TODO: Make something like FieldsContainer and put them there?
     List<BackButtonMenu.PulledDialog> getPulledDialogs();
     void setPulledDialogs(List<BackButtonMenu.PulledDialog> pulledDialogs);
 
-    static INavigationLayout newLayout(Context context) {
-        return new ActionBarLayout(context);
+    static INavigationLayout newLayout(Context context, boolean main) {
+        return new ActionBarLayout(context, main);
     }
 
-    static INavigationLayout newLayout(Context context, Supplier<BottomSheet> supplier) {
-        return new ActionBarLayout(context) {
+    static INavigationLayout newLayout(Context context, boolean main, Supplier<BottomSheet> supplier) {
+        return new ActionBarLayout(context, main) {
             @Override
             public BottomSheet getBottomSheet() {
                 return supplier.get();
@@ -152,20 +156,35 @@ public interface INavigationLayout {
         return getFragmentStack().isEmpty() ? null : getFragmentStack().get(getFragmentStack().size() - 1);
     }
 
+    default BaseFragment getSafeLastFragment() {
+        if (getFragmentStack().isEmpty()) return null;
+        for (int i = getFragmentStack().size() - 1; i >= 0; --i) {
+            BaseFragment fragment = getFragmentStack().get(i);
+            if (fragment == null || fragment.getContext() == null || fragment.isFinishing() || fragment.isRemovingFromStack())
+                continue;
+            return fragment;
+        }
+        return null;
+    }
+
+    default <T extends BaseFragment> T findFragment(Class<T> clazz) {
+        if (getFragmentStack().isEmpty()) return null;
+        for (int i = getFragmentStack().size() - 1; i >= 0; --i) {
+            BaseFragment fragment = getFragmentStack().get(i);
+            if (fragment == null || fragment.isFinishing() || fragment.isRemovingFromStack())
+                continue;
+            if (clazz.isInstance(fragment))
+                return (T) fragment;
+        }
+        return null;
+    }
+
     default void animateThemedValues(Theme.ThemeInfo theme, int accentId, boolean nightTheme, boolean instant) {
         animateThemedValues(new ThemeAnimationSettings(theme, accentId, nightTheme, instant), null);
     }
 
     default void animateThemedValues(Theme.ThemeInfo theme, int accentId, boolean nightTheme, boolean instant, Runnable onDone) {
         animateThemedValues(new ThemeAnimationSettings(theme, accentId, nightTheme, instant), onDone);
-    }
-
-    /**
-     * @deprecated Deprecated in favor of {@link INavigationLayout#bringToFront(int)}
-     */
-    @Deprecated
-    default void showFragment(int i) {
-        bringToFront(i);
     }
 
     default void bringToFront(int i) {
@@ -323,12 +342,18 @@ public interface INavigationLayout {
         public boolean preview;
         public ActionBarPopupWindow.ActionBarPopupWindowLayout menuView;
         public boolean needDelayWithoutAnimation;
+        public boolean forceRightLayout;
 
         public boolean isFromDelay;
         public boolean delayDone;
 
         public NavigationParams(BaseFragment fragment) {
             this.fragment = fragment;
+        }
+
+        public NavigationParams forceRightLayout() {
+            forceRightLayout = true;
+            return this;
         }
 
         public NavigationParams setRemoveLast(boolean removeLast) {
@@ -422,6 +447,15 @@ public interface INavigationLayout {
         }
     }
 
+    void setNavigationBarColor(int color);
+
+    default int getBottomTabsHeight(boolean animated) {
+        return 0;
+    }
+
+    default BottomSheetTabs getBottomSheetTabs() {
+        return null;
+    }
     enum BackButtonState {
         BACK,
         MENU

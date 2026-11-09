@@ -1,39 +1,30 @@
 package org.telegram.ui.Components.spoilers;
 
-import static org.telegram.messenger.AndroidUtilities.dpf2;
-
 import android.app.Activity;
-import android.content.Context;
 import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.Paint;
 import android.graphics.SurfaceTexture;
-import android.hardware.HardwareBuffer;
 import android.opengl.EGL14;
 import android.opengl.EGLExt;
 import android.opengl.GLES20;
 import android.opengl.GLES31;
-import android.os.Build;
-import android.util.Log;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.FrameLayout;
 
 import androidx.annotation.NonNull;
-import androidx.collection.LongSparseArray;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.R;
 import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
-import org.telegram.ui.Components.RLottieDrawable;
 
 import java.util.ArrayList;
 import java.util.HashMap;
-import java.util.Objects;
 
 import javax.microedition.khronos.egl.EGL10;
 import javax.microedition.khronos.egl.EGLConfig;
@@ -47,25 +38,41 @@ public class SpoilerEffect2 {
     private final double MIN_DELTA;
     private final double MAX_DELTA;
 
+    public static final int TYPE_DEFAULT = 0;
+    public static final int TYPE_PREVIEW = 1;
+
+    public final int type;
+
     public static boolean supports() {
-        return Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP;
+        return true;
     }
 
-    private static SpoilerEffect2 instance;
+    private static HashMap<Integer, SpoilerEffect2> instance;
     public static SpoilerEffect2 getInstance(View view) {
+        return getInstance(TYPE_DEFAULT, view);
+    }
+
+    public static SpoilerEffect2 getInstance(int type, View view) {
+        return getInstance(type, view, getRootView(view));
+    }
+
+    public static SpoilerEffect2 getInstance(int type, View view, ViewGroup rootView) {
         if (view == null || !supports()) {
             return null;
         }
         if (instance == null) {
+            instance = new HashMap<>();
+        }
+        SpoilerEffect2 e = instance.get(type);
+        if (e == null) {
             final int sz = getSize();
-            ViewGroup rootView = getRootView(view);
             if (rootView == null) {
                 return null;
             }
-            instance = new SpoilerEffect2(makeTextureViewContainer(rootView), sz, sz);
+            instance.put(type, e = new SpoilerEffect2(type, makeTextureViewContainer(rootView), sz, sz));
         }
-        instance.attach(view);
-        return instance;
+        e.attach(view);
+        return e;
     }
 
     private static ViewGroup getRootView(View view) {
@@ -81,8 +88,16 @@ public class SpoilerEffect2 {
     }
 
     public static void pause(boolean pause) {
-        if (instance != null && instance.thread != null) {
-            instance.thread.pause(pause);
+        if (instance == null) return;
+        for (SpoilerEffect2 s : instance.values()) {
+            if (s.thread != null) s.thread.pause(pause);
+        }
+    }
+
+    public static void pause(int type, boolean pause) {
+        if (instance == null) return;
+        for (SpoilerEffect2 s : instance.values()) {
+            if (s.type == type && s.thread != null) s.thread.pause(pause);
         }
     }
 
@@ -92,8 +107,8 @@ public class SpoilerEffect2 {
                 return Math.min(1280, (int) ((AndroidUtilities.displaySize.x + AndroidUtilities.displaySize.y) / 2f * 1.0f));
             case SharedConfig.PERFORMANCE_CLASS_AVERAGE:
                 return Math.min(900, (int) ((AndroidUtilities.displaySize.x + AndroidUtilities.displaySize.y) / 2f * .8f));
-            default:
             case SharedConfig.PERFORMANCE_CLASS_LOW:
+            default:
                 return Math.min(720, (int) ((AndroidUtilities.displaySize.x + AndroidUtilities.displaySize.y) / 2f * .7f));
         }
     }
@@ -102,7 +117,7 @@ public class SpoilerEffect2 {
     private static FrameLayout makeTextureViewContainer(ViewGroup rootView) {
         FrameLayout container = new FrameLayout(rootView.getContext()) {
             @Override
-            protected boolean drawChild(Canvas canvas, View child, long drawingTime) {
+            protected boolean drawChild(@NonNull Canvas canvas, View child, long drawingTime) {
                 return false;
             }
         };
@@ -116,7 +131,7 @@ public class SpoilerEffect2 {
     private int width, height;
     public boolean destroyed;
 
-    private final ArrayList<View> holders = new ArrayList<View>();
+    private final ArrayList<View> holders = new ArrayList<>();
     private final HashMap<View, Integer> holdersToIndex = new HashMap<>();
     private int holdersIndex = 0;
 
@@ -185,6 +200,10 @@ public class SpoilerEffect2 {
         if (index == null) {
             index = 0;
         }
+        if (w > ow || h > oh) {
+            final float scale = Math.max(w / (float) ow, h / (float) oh);
+            canvas.scale(scale, scale);
+        }
         if ((index % 4) == 1) {
             canvas.rotate(180, ow / 2f, oh / 2f);
         }
@@ -194,12 +213,6 @@ public class SpoilerEffect2 {
         if ((index % 4) == 3) {
             canvas.scale(1, -1, ow / 2f, oh / 2f);
         }
-        canvas.translate(w / 2f, h / 2f);
-        if (w > ow || h > oh) {
-            final float scale = Math.max(w / (float) ow, h / (float) oh);
-            canvas.scale(scale, scale);
-        }
-        canvas.translate(-w / 2f, -h / 2f);
         if (toBitmap) {
             Bitmap bitmap = textureView.getBitmap();
             if (bitmap != null) {
@@ -229,11 +242,12 @@ public class SpoilerEffect2 {
         }
     }
 
-    private SpoilerEffect2(ViewGroup container, int width, int height) {
+    private SpoilerEffect2(int type, ViewGroup container, int width, int height) {
         MAX_FPS = (int) AndroidUtilities.screenRefreshRate;
         MIN_DELTA = 1.0 / MAX_FPS;
         MAX_DELTA = MIN_DELTA * 4;
 
+        this.type = type;
         this.width = width;
         this.height = height;
 
@@ -297,7 +311,7 @@ public class SpoilerEffect2 {
         private boolean resize;
         private int width, height;
         private int particlesCount;
-        private float radius = AndroidUtilities.dpf2(1.2f);
+        private final float radius = AndroidUtilities.dpf2(1.2f);
 
         public SpoilerThread(SurfaceTexture surfaceTexture, int width, int height, Runnable invalidate) {
             this.invalidate = invalidate;
@@ -333,19 +347,19 @@ public class SpoilerEffect2 {
             long lastTime = System.nanoTime();
             while (running) {
                 final long now = System.nanoTime();
-                double Δt = (now - lastTime) / 1_000_000_000.;
+                double dt = (now - lastTime) / 1_000_000_000.;
                 lastTime = now;
 
-                if (Δt < MIN_DELTA) {
-                    double wait = MIN_DELTA - Δt;
+                if (dt < MIN_DELTA) {
+                    double wait = MIN_DELTA - dt;
                     try {
                         long milli = (long) (wait * 1000L);
                         int nano = (int) ((wait - milli / 1000.) * 1_000_000_000);
                         sleep(milli, nano);
                     } catch (Exception ignore) {}
-                    Δt = MIN_DELTA;
-                } else if (Δt > MAX_DELTA) {
-                    Δt = MAX_DELTA;
+                    dt = MIN_DELTA;
+                } else if (dt > MAX_DELTA) {
+                    dt = MAX_DELTA;
                 }
 
                 while (paused) {
@@ -355,7 +369,7 @@ public class SpoilerEffect2 {
                 }
 
                 checkResize();
-                drawFrame((float) Δt);
+                drawFrame((float) dt);
 
                 AndroidUtilities.cancelRunOnUIThread(this.invalidate);
                 AndroidUtilities.runOnUIThread(this.invalidate);
@@ -386,7 +400,7 @@ public class SpoilerEffect2 {
             egl = (EGL10) javax.microedition.khronos.egl.EGLContext.getEGL();
 
             eglDisplay = egl.eglGetDisplay(EGL14.EGL_DEFAULT_DISPLAY);
-            if (eglDisplay == egl.EGL_NO_DISPLAY) {
+            if (eglDisplay == EGL10.EGL_NO_DISPLAY) {
                 running = false;
                 return;
             }
@@ -416,7 +430,7 @@ public class SpoilerEffect2 {
                 EGL14.EGL_CONTEXT_CLIENT_VERSION, 3,
                 EGL14.EGL_NONE
             };
-            eglContext = egl.eglCreateContext(eglDisplay, eglConfig, egl.EGL_NO_CONTEXT, contextAttributes);
+            eglContext = egl.eglCreateContext(eglDisplay, eglConfig, EGL10.EGL_NO_CONTEXT, contextAttributes);
             if (eglContext == null) {
                 running = false;
                 return;
@@ -442,7 +456,7 @@ public class SpoilerEffect2 {
                 running = false;
                 return;
             }
-            GLES31.glShaderSource(vertexShader, RLottieDrawable.readRes(null, R.raw.spoiler_vertex) + "\n// " + Math.random());
+            GLES31.glShaderSource(vertexShader, AndroidUtilities.readRes(R.raw.spoiler_vertex));
             GLES31.glCompileShader(vertexShader);
             int[] status = new int[1];
             GLES31.glGetShaderiv(vertexShader, GLES31.GL_COMPILE_STATUS, status, 0);
@@ -452,7 +466,7 @@ public class SpoilerEffect2 {
                 running = false;
                 return;
             }
-            GLES31.glShaderSource(fragmentShader, RLottieDrawable.readRes(null, R.raw.spoiler_fragment) + "\n// " + Math.random());
+            GLES31.glShaderSource(fragmentShader, AndroidUtilities.readRes(R.raw.spoiler_fragment));
             GLES31.glCompileShader(fragmentShader);
             GLES31.glGetShaderiv(fragmentShader, GLES31.GL_COMPILE_STATUS, status, 0);
             if (status[0] == 0) {
@@ -501,13 +515,13 @@ public class SpoilerEffect2 {
         private float t;
         private final float timeScale = .65f;
 
-        private void drawFrame(float Δt) {
+        private void drawFrame(float dt) {
             if (!egl.eglMakeCurrent(eglDisplay, eglSurface, eglSurface, eglContext)) {
                 running = false;
                 return;
             }
 
-            t += Δt * timeScale;
+            t += dt * timeScale;
             if (t > 1000.f) {
                 t = 0;
             }
@@ -532,7 +546,7 @@ public class SpoilerEffect2 {
             GLES31.glVertexAttribPointer(3, 1, GLES31.GL_FLOAT, false, 24, 20); // Duration (float)
             GLES31.glEnableVertexAttribArray(3);
             GLES31.glUniform1f(timeHandle, t);
-            GLES31.glUniform1f(deltaTimeHandle, Δt * timeScale);
+            GLES31.glUniform1f(deltaTimeHandle, dt * timeScale);
             GLES31.glBeginTransformFeedback(GLES31.GL_POINTS);
             GLES31.glDrawArrays(GLES31.GL_POINTS, 0, particlesCount);
             GLES31.glEndTransformFeedback();
@@ -550,19 +564,19 @@ public class SpoilerEffect2 {
 
         private void die() {
             if (particlesData != null) {
-                try { GLES31.glDeleteBuffers(2, particlesData, 0); } catch (Exception e) { FileLog.e(e); };
+                try { GLES31.glDeleteBuffers(2, particlesData, 0); } catch (Exception e) { FileLog.e(e); }
                 particlesData = null;
             }
             if (drawProgram != 0) {
-                try { GLES31.glDeleteProgram(drawProgram); } catch (Exception e) { FileLog.e(e); };
+                try { GLES31.glDeleteProgram(drawProgram); } catch (Exception e) { FileLog.e(e); }
                 drawProgram = 0;
             }
             if (egl != null) {
-                try { egl.eglMakeCurrent(eglDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT); } catch (Exception e) { FileLog.e(e); };
-                try { egl.eglDestroySurface(eglDisplay, eglSurface); } catch (Exception e) { FileLog.e(e); };
-                try { egl.eglDestroyContext(eglDisplay, eglContext); } catch (Exception e) { FileLog.e(e); };
+                try { egl.eglMakeCurrent(eglDisplay, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_SURFACE, EGL10.EGL_NO_CONTEXT); } catch (Exception e) { FileLog.e(e); }
+                try { egl.eglDestroySurface(eglDisplay, eglSurface); } catch (Exception e) { FileLog.e(e); }
+                try { egl.eglDestroyContext(eglDisplay, eglContext); } catch (Exception e) { FileLog.e(e); }
             }
-            try { surfaceTexture.release(); } catch (Exception e) { FileLog.e(e); };
+            try { surfaceTexture.release(); } catch (Exception e) { FileLog.e(e); }
 
             checkGlErrors();
         }

@@ -7,21 +7,15 @@ import static org.telegram.ui.ActionBar.Theme.RIPPLE_MASK_CIRCLE_20DP;
 
 import android.content.Context;
 import android.content.DialogInterface;
-import android.graphics.Bitmap;
 import android.graphics.Canvas;
 import android.graphics.Color;
 import android.graphics.ColorFilter;
 import android.graphics.Paint;
 import android.graphics.Path;
 import android.graphics.PixelFormat;
-import android.graphics.PorterDuff;
-import android.graphics.PorterDuffColorFilter;
-import android.graphics.PorterDuffXfermode;
 import android.graphics.RectF;
 import android.graphics.drawable.AnimatedVectorDrawable;
 import android.graphics.drawable.Drawable;
-import android.os.Build;
-import android.text.TextPaint;
 import android.view.Gravity;
 import android.view.HapticFeedbackConstants;
 import android.view.MotionEvent;
@@ -32,7 +26,6 @@ import android.widget.TextView;
 
 import androidx.annotation.Nullable;
 import androidx.core.content.ContextCompat;
-import androidx.core.graphics.ColorUtils;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.LiteMode;
@@ -43,6 +36,7 @@ import org.telegram.messenger.UserConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.AnimatedTextView;
 import org.telegram.ui.Components.BlobDrawable;
@@ -79,7 +73,8 @@ public class CaptionStory extends CaptionContainerView {
         roundButton.setImageResource(R.drawable.input_video_story);
         roundButton.setBackground(Theme.createSelectorDrawable(Theme.ACTION_BAR_WHITE_SELECTOR_COLOR, RIPPLE_MASK_CIRCLE_20DP, dp(18)));
         roundButton.setScaleType(ImageView.ScaleType.CENTER);
-        addView(roundButton, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 11, 10));
+        roundButton.setContentDescription(LocaleController.getString(R.string.AccDescrVideoMessage));
+        addView(roundButton, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 11, 6));
         roundButton.setOnClickListener(e -> {
             showRemoveRoundAlert();
         });
@@ -88,8 +83,9 @@ public class CaptionStory extends CaptionContainerView {
         periodButton.setImageDrawable(periodDrawable = new PeriodDrawable());
         periodButton.setBackground(Theme.createSelectorDrawable(Theme.ACTION_BAR_WHITE_SELECTOR_COLOR, RIPPLE_MASK_CIRCLE_20DP, dp(18)));
         periodButton.setScaleType(ImageView.ScaleType.CENTER);
+        periodButton.setContentDescription(LocaleController.getString(R.string.StoryPeriodHint));
         setPeriod(86400, false);
-        addView(periodButton, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 11 + 44 - 4, 10));
+        addView(periodButton, LayoutHelper.createFrame(44, 44, Gravity.RIGHT | Gravity.BOTTOM, 0, 0, 11 + 44 - 4, 6));
         periodButton.setOnClickListener(e -> {
             if (periodPopup != null && periodPopup.isShown()) {
                 return;
@@ -111,7 +107,7 @@ public class CaptionStory extends CaptionContainerView {
             };
 
             periodPopup = ItemOptions.makeOptions(rootView, resourcesProvider, periodButton);
-            periodPopup.addText(LocaleController.getString("StoryPeriodHint"), 13);
+            periodPopup.addText(LocaleController.getString("StoryPeriodHint"), 13, dp(200));
             periodPopup.addGap();
             for (int i = 0; i < periods.length; ++i) {
                 final int period = periods[i];
@@ -135,16 +131,13 @@ public class CaptionStory extends CaptionContainerView {
 
     private void checkFlipButton() {
         if (flipButton != null) return;
-        if (android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.LOLLIPOP) {
-            flipButton = (AnimatedVectorDrawable) ContextCompat.getDrawable(getContext(), R.drawable.avd_flip);
-        } else {
-            flipButton = getContext().getResources().getDrawable(R.drawable.vd_flip).mutate();
-        }
+        flipButton = ContextCompat.getDrawable(getContext(), R.drawable.avd_flip);
     }
 
     private boolean hasRoundVideo;
     public void setHasRoundVideo(boolean hasRoundVideo) {
         roundButton.setImageResource(hasRoundVideo ? R.drawable.input_video_story_remove : R.drawable.input_video_story);
+        roundButton.setContentDescription(LocaleController.getString(hasRoundVideo ? R.string.AccDescrRemoveRoundVideo : R.string.AccDescrVideoMessage));
         this.hasRoundVideo = hasRoundVideo;
     }
 
@@ -153,7 +146,7 @@ public class CaptionStory extends CaptionContainerView {
     {
         timerTextDrawable.setAnimationProperties(.16f, 0, 50, CubicBezierInterpolator.DEFAULT);
         timerTextDrawable.setTextSize(AndroidUtilities.dp(15));
-        timerTextDrawable.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        timerTextDrawable.setTypeface(AndroidUtilities.bold());
         timerTextDrawable.setText("0:00.0");
         timerTextDrawable.setTextColor(Color.WHITE);
     }
@@ -228,7 +221,7 @@ public class CaptionStory extends CaptionContainerView {
 
             if (cancelAlpha > 0) {
                 if (cancelText == null) {
-                    cancelText = new Text(LocaleController.getString(R.string.CancelRound), 15, AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+                    cancelText = new Text(LocaleController.getString(R.string.CancelRound), 15, AndroidUtilities.bold());
                 }
 
                 cancelText.ellipsize((int) (bounds.width() - dp(5 + 21 + 16 + 10 + 64) - timerTextDrawable.getCurrentWidth()));
@@ -562,7 +555,7 @@ public class CaptionStory extends CaptionContainerView {
                 if (AndroidUtilities.rectTmp.contains(ev.getX(i), ev.getY(i))) {
                     if (ev.getAction() == MotionEvent.ACTION_DOWN || ev.getActionMasked() == MotionEvent.ACTION_POINTER_DOWN) {
                         currentRecorder.cameraView.switchCamera();
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.LOLLIPOP && flipButton instanceof AnimatedVectorDrawable) {
+                        if (flipButton instanceof AnimatedVectorDrawable) {
                             ((AnimatedVectorDrawable) flipButton).start();
                         }
                     }
@@ -725,7 +718,7 @@ public class CaptionStory extends CaptionContainerView {
                 .show();
         TextView button = (TextView) d.getButton(DialogInterface.BUTTON_POSITIVE);
         if (button != null) {
-            button.setTextColor(Theme.getColor(Theme.key_text_RedBold, resourcesProvider));
+            ThemeBind.textColor(button, Theme.key_text_RedBold, resourcesProvider);
         }
     }
 
@@ -776,8 +769,7 @@ public class CaptionStory extends CaptionContainerView {
         public RecordDot(View parent) {
             this.parent = parent;
             int resId = R.raw.chat_audio_record_delete_3;
-            drawable = new RLottieDrawable(resId, "" + resId, AndroidUtilities.dp(28), AndroidUtilities.dp(28), false, null);
-            drawable.setCurrentParentView(parent);
+            drawable = new RLottieDrawable(resId, AndroidUtilities.dp(28), AndroidUtilities.dp(28), false, null);
             drawable.setInvalidateOnProgressSet(true);
             updateColors();
         }
@@ -786,8 +778,8 @@ public class CaptionStory extends CaptionContainerView {
             int dotColor = 0xffDB4646;
             redDotPaint.setColor(dotColor);
             drawable.beginApplyLayerColors();
-            drawable.setLayerColor("Cup Red.**", dotColor);
-            drawable.setLayerColor("Box.**", dotColor);
+            drawable.setLayerColor("Cup Red", dotColor);
+            drawable.setLayerColor("Box", dotColor);
             drawable.commitApplyLayerColors();
         }
 

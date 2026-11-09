@@ -1,5 +1,6 @@
 package org.telegram.ui.Components;
 
+import android.annotation.SuppressLint;
 import android.app.Activity;
 import android.content.Context;
 import android.graphics.Canvas;
@@ -21,7 +22,6 @@ import androidx.recyclerview.widget.RecyclerView;
 import org.telegram.messenger.AccountInstance;
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.DownloadController;
-import org.telegram.messenger.FileLoadOperation;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
 import org.telegram.messenger.LocaleController;
@@ -36,6 +36,7 @@ import org.telegram.tgnet.ConnectionsManager;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.BaseFragment;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.GraySectionCell;
 import org.telegram.ui.Cells.SharedAudioCell;
 import org.telegram.ui.Cells.SharedDocumentCell;
@@ -45,11 +46,12 @@ import org.telegram.ui.PremiumPreviewFragment;
 
 import java.util.ArrayList;
 
+@SuppressLint("ViewConstructor")
 public class SearchDownloadsContainer extends FrameLayout implements NotificationCenter.NotificationCenterDelegate {
 
     private final FlickerLoadingView loadingView;
     StickerEmptyView emptyView;
-    public RecyclerListView recyclerListView;
+    public final @NonNull RecyclerListView recyclerListView;
     DownloadsAdapter adapter = new DownloadsAdapter();
     private final int currentAccount;
 
@@ -85,7 +87,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
         this.parentFragment = fragment;
         this.parentActivity = fragment.getParentActivity();
         this.currentAccount = currentAccount;
-        recyclerListView = new BlurredRecyclerView(getContext()) {
+        recyclerListView = new RecyclerListView(getContext()) {
             @Override
             protected void onLayout(boolean changed, int l, int t, int r, int b) {
                 super.onLayout(changed, l, t, r, b);
@@ -211,6 +213,35 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
         FileLoader.getInstance(currentAccount).getCurrentLoadingFiles(currentLoadingFiles);
     }
 
+    public void setPagesPaddings(int top, int bottom) {
+        setPagesPaddings(top, bottom, false);
+    }
+
+    public void setPagesPaddings(int top, int bottom, boolean doNotRequestLayout) {
+        setClipToPadding(false);
+        ignoreRequestLayout = doNotRequestLayout;
+
+        setPadding(0, top, 0, bottom);
+        recyclerListView.setPadding(0, top, 0, bottom, doNotRequestLayout);
+
+        MarginLayoutParams lp = null;
+        lp = (MarginLayoutParams) recyclerListView.getLayoutParams();
+        lp.topMargin = -top;
+        lp.bottomMargin = -bottom;
+
+        ignoreRequestLayout = false;
+    }
+
+    private boolean ignoreRequestLayout;
+
+    @Override
+    public void requestLayout() {
+        if (ignoreRequestLayout) {
+            return;
+        }
+        super.requestLayout();
+    }
+
     private void checkFilesExist() {
         if (checkingFilesExist) {
             return;
@@ -275,7 +306,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
             updateListInternal(animated, currentLoadingFilesTmp, recentLoadingFilesTmp);
             if (rowCount == 0) {
                 emptyView.showProgress(false, false);
-                emptyView.title.setText(LocaleController.getString("SearchEmptyViewDownloads", R.string.SearchEmptyViewDownloads));
+                emptyView.title.setText(LocaleController.getString(R.string.SearchEmptyViewDownloads));
                 emptyView.subtitle.setVisibility(View.GONE);
             }
             emptyView.setStickerType(9);
@@ -288,7 +319,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
             FileLoader.getInstance(currentAccount).getRecentLoadingFiles(recentLoadingFilesTmp);
 
             String q = searchQuery.toLowerCase();
-            boolean sameQuery = q.equals(lastQueryString);
+            final boolean sameQuery = q.equals(lastQueryString);
 
             lastQueryString = q;
             Utilities.searchQueue.cancelRunnable(lastSearchRunnable);
@@ -296,8 +327,9 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
                 ArrayList<MessageObject> currentLoadingFilesRes = new ArrayList<>();
                 ArrayList<MessageObject> recentLoadingFilesRes = new ArrayList<>();
                 for (int i = 0; i < currentLoadingFilesTmp.size(); i++) {
-                    if (FileLoader.getDocumentFileName(currentLoadingFilesTmp.get(i).getDocument()).toLowerCase().contains(q)) {
-                        MessageObject messageObject = new MessageObject(currentAccount, currentLoadingFilesTmp.get(i).messageOwner, false, false);
+                    final String filename = FileLoader.getDocumentFileName(currentLoadingFilesTmp.get(i).getDocument());
+                    if (filename != null && filename.toLowerCase().contains(q)) {
+                        final MessageObject messageObject = new MessageObject(currentAccount, currentLoadingFilesTmp.get(i).messageOwner, false, false);
                         messageObject.mediaExists = currentLoadingFilesTmp.get(i).mediaExists;
                         messageObject.setQuery(searchQuery);
                         currentLoadingFilesRes.add(messageObject);
@@ -305,9 +337,9 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
                 }
 
                 for (int i = 0; i < recentLoadingFilesTmp.size(); i++) {
-                    String documentName = FileLoader.getDocumentFileName(recentLoadingFilesTmp.get(i).getDocument());
+                    final String documentName = FileLoader.getDocumentFileName(recentLoadingFilesTmp.get(i).getDocument());
                     if (documentName != null && documentName.toLowerCase().contains(q)) {
-                        MessageObject messageObject = new MessageObject(currentAccount, recentLoadingFilesTmp.get(i).messageOwner, false, false);
+                        final MessageObject messageObject = new MessageObject(currentAccount, recentLoadingFilesTmp.get(i).messageOwner, false, false);
                         messageObject.mediaExists = recentLoadingFilesTmp.get(i).mediaExists;
                         messageObject.setQuery(searchQuery);
                         recentLoadingFilesRes.add(messageObject);
@@ -322,9 +354,9 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
                         if (rowCount == 0) {
                             emptyView.showProgress(false, true);
 
-                            emptyView.title.setText(LocaleController.getString("SearchEmptyViewTitle2", R.string.SearchEmptyViewTitle2));
+                            emptyView.title.setText(LocaleController.getString(R.string.SearchEmptyViewTitle2));
                             emptyView.subtitle.setVisibility(View.VISIBLE);
-                            emptyView.subtitle.setText(LocaleController.getString("SearchEmptyViewFilteredSubtitle2", R.string.SearchEmptyViewFilteredSubtitle2));
+                            emptyView.subtitle.setText(LocaleController.getString(R.string.SearchEmptyViewFilteredSubtitle2));
                         }
                     }
                 });
@@ -512,11 +544,11 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
             if (type == 0) {
                 GraySectionCell graySectionCell = (GraySectionCell) holder.itemView;
                 if (position == downloadingFilesHeader) {
-                    String header = LocaleController.getString("Downloading", R.string.Downloading);
+                    String header = LocaleController.getString(R.string.Downloading);
                     if (graySectionCell.getText().equals(header)) {
-                        graySectionCell.setRightText(hasCurrentDownload ? LocaleController.getString("PauseAll", R.string.PauseAll) : LocaleController.getString("ResumeAll", R.string.ResumeAll), hasCurrentDownload);
+                        graySectionCell.setRightText(hasCurrentDownload ? LocaleController.getString(R.string.PauseAll) : LocaleController.getString(R.string.ResumeAll), hasCurrentDownload);
                     } else {
-                        graySectionCell.setText(header, hasCurrentDownload ? LocaleController.getString("PauseAll", R.string.PauseAll) : LocaleController.getString("ResumeAll", R.string.ResumeAll), new OnClickListener() {
+                        graySectionCell.setText(header, hasCurrentDownload ? LocaleController.getString(R.string.PauseAll) : LocaleController.getString(R.string.ResumeAll), new OnClickListener() {
                             @Override
                             public void onClick(View view) {
                                 for (int i = 0; i < currentLoadingFiles.size(); i++) {
@@ -533,7 +565,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
                         });
                     }
                 } else if (position == recentFilesHeader) {
-                    graySectionCell.setText(LocaleController.getString("RecentlyDownloaded", R.string.RecentlyDownloaded), LocaleController.getString("Settings", R.string.Settings),
+                    graySectionCell.setText(LocaleController.getString(R.string.RecentlyDownloaded), LocaleController.getString(R.string.Settings),
                             view -> DownloadsInfoBottomSheet.show(parentActivity, parentFragment)
                     );
                 }
@@ -543,7 +575,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
                     boolean showReorder = uiCallback.actionModeShowing() && position >= downloadingFilesStartRow && position < downloadingFilesEndRow;
                     if (type == 1) {
                         Cell view = (Cell) holder.itemView;
-                        view.setBackgroundColor(Theme.getColor(Theme.key_windowBackgroundWhite));
+                        ThemeBind.backgroundColor(view, Theme.key_windowBackgroundWhite);
                         int oldId = view.sharedDocumentCell.getMessage() == null ? 0 : view.sharedDocumentCell.getMessage().getId();
                         view.sharedDocumentCell.setDocument(messageObject, true);
                         messageHashIdTmp.set(view.sharedDocumentCell.getMessage().getId(), view.sharedDocumentCell.getMessage().getDialogId());
@@ -599,8 +631,8 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
     @Override
     protected void onAttachedToWindow() {
         super.onAttachedToWindow();
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.onDownloadingFilesChanged);
-        NotificationCenter.getInstance(currentAccount).addObserver(this, NotificationCenter.premiumFloodWaitReceived);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.onDownloadingFilesChanged);
+        NotificationCenter.getInstance(currentAccount).addWeakObserver(this, NotificationCenter.premiumFloodWaitReceived);
         if (getVisibility() == View.VISIBLE) {
             DownloadController.getInstance(currentAccount).clearUnviewedDownloads();
         }
@@ -767,7 +799,7 @@ public class SearchDownloadsContainer extends FrameLayout implements Notificatio
             n = MessagesController.getInstance(currentAccount).uploadPremiumSpeedupDownload;
         }
         SpannableString boldN = new SpannableString(Double.toString(Math.round(n * 10) / 10.0).replaceAll("\\.0$", ""));
-        boldN.setSpan(new TypefaceSpan(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM)), 0, boldN.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
+        boldN.setSpan(new TypefaceSpan(AndroidUtilities.bold()), 0, boldN.length(), Spanned.SPAN_EXCLUSIVE_EXCLUSIVE);
 
         if (parentFragment.hasStoryViewer()) return;
         BulletinFactory.of(parentFragment).createSimpleBulletin(

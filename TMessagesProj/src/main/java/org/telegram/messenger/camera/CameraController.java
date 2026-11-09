@@ -22,11 +22,9 @@ import android.os.Build;
 import android.provider.MediaStore;
 import android.text.TextUtils;
 import android.util.Base64;
-import android.util.Log;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.ApplicationLoader;
-import org.telegram.messenger.Bitmaps;
 import org.telegram.messenger.BuildVars;
 import org.telegram.messenger.FileLoader;
 import org.telegram.messenger.FileLog;
@@ -38,7 +36,6 @@ import org.telegram.messenger.SharedConfig;
 import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.SerializedData;
 
-import java.io.ByteArrayInputStream;
 import java.io.File;
 import java.io.FileOutputStream;
 import java.util.ArrayList;
@@ -337,8 +334,8 @@ public class CameraController implements MediaRecorder.OnInfoListener {
 
             // Break if the marker is EXIF in APP1.
             if (marker == 0xE1 && length >= 8 &&
-                    pack(jpeg, offset + 2, 4, false) == 0x45786966 &&
-                    pack(jpeg, offset + 6, 2, false) == 0) {
+                pack(jpeg, offset + 2, 4, false) == 0x45786966 &&
+                pack(jpeg, offset + 6, 2, false) == 0) {
                 offset += 8;
                 length -= 8;
                 break;
@@ -441,7 +438,9 @@ public class CameraController implements MediaRecorder.OnInfoListener {
                                 }
                                 orientation = 0;
                                 matrix.postScale(-1, 1);
-                                Bitmap scaled = Bitmaps.createBitmap(bitmap, 0, 0, bitmap.getWidth(), bitmap.getHeight(), matrix, true);
+                                int width = bitmap.getWidth();
+                                int height = bitmap.getHeight();
+                                Bitmap scaled = Bitmap.createBitmap(bitmap, 0, 0, width, height, matrix, true);
                                 if (scaled != bitmap) {
                                     bitmap.recycle();
                                 }
@@ -553,6 +552,22 @@ public class CameraController implements MediaRecorder.OnInfoListener {
                     camera = session.cameraInfo.camera = Camera.open(session.cameraInfo.cameraId);
                 }
                 Camera.Parameters params = camera.getParameters();
+
+                List<String> rawFlashModes = params.getSupportedFlashModes();
+                session.availableFlashModes.clear();
+                if (rawFlashModes != null) {
+                    for (int a = 0; a < rawFlashModes.size(); a++) {
+                        String rawFlashMode = rawFlashModes.get(a);
+                        if (rawFlashMode.equals(Camera.Parameters.FLASH_MODE_OFF) || rawFlashMode.equals(Camera.Parameters.FLASH_MODE_ON) || rawFlashMode.equals(Camera.Parameters.FLASH_MODE_AUTO)) {
+                            session.availableFlashModes.add(rawFlashMode);
+                        }
+                    }
+                    if (!TextUtils.equals(session.getCurrentFlashMode(), params.getFlashMode()) || !session.availableFlashModes.contains(session.getCurrentFlashMode())) {
+                        session.checkFlashMode(session.availableFlashModes.get(0));
+                    } else {
+                        session.checkFlashMode(session.getCurrentFlashMode());
+                    }
+                }
 
                 session.configureRoundCamera(true);
                 if (configureCallback != null) {

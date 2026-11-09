@@ -1,10 +1,10 @@
 package org.telegram.ui;
 
 import static org.telegram.messenger.AndroidUtilities.dp;
+import static org.telegram.messenger.AndroidUtilities.lerp;
 
 import android.animation.Animator;
 import android.animation.AnimatorListenerAdapter;
-import android.animation.StateListAnimator;
 import android.animation.ValueAnimator;
 import android.app.Dialog;
 import android.content.Context;
@@ -14,41 +14,34 @@ import android.graphics.BitmapShader;
 import android.graphics.Canvas;
 import android.graphics.ColorMatrix;
 import android.graphics.ColorMatrixColorFilter;
-import android.graphics.Insets;
 import android.graphics.Matrix;
 import android.graphics.Paint;
 import android.graphics.Path;
-import android.graphics.PixelFormat;
 import android.graphics.PorterDuff;
 import android.graphics.PorterDuffXfermode;
 import android.graphics.RadialGradient;
-import android.graphics.Rect;
 import android.graphics.RectF;
 import android.graphics.Shader;
 import android.graphics.SurfaceTexture;
 import android.net.Uri;
-import android.os.Build;
 import android.os.Bundle;
 import android.text.Layout;
-import android.util.AndroidRuntimeException;
 import android.view.Gravity;
 import android.view.KeyEvent;
 import android.view.TextureView;
 import android.view.View;
 import android.view.ViewGroup;
 import android.view.Window;
-import android.view.WindowInsets;
 import android.view.WindowManager;
 import android.view.animation.LinearInterpolator;
 import android.widget.FrameLayout;
 import android.widget.TextView;
 
-import androidx.annotation.NonNull;
+import androidx.core.graphics.Insets;
+import androidx.core.view.ViewCompat;
 import androidx.core.view.WindowInsetsCompat;
-import androidx.recyclerview.widget.ChatListItemAnimator;
 
-import com.google.android.exoplayer2.ExoPlayer;
-import com.google.android.exoplayer2.util.Log;
+import androidx.media3.exoplayer.ExoPlayer;
 
 import org.telegram.messenger.AndroidUtilities;
 import org.telegram.messenger.BuildVars;
@@ -65,6 +58,7 @@ import org.telegram.messenger.Utilities;
 import org.telegram.tgnet.TLRPC;
 import org.telegram.ui.ActionBar.AlertDialog;
 import org.telegram.ui.ActionBar.Theme;
+import org.telegram.ui.ActionBar.ThemeBind;
 import org.telegram.ui.Cells.ChatMessageCell;
 import org.telegram.ui.Components.AnimatedFloat;
 import org.telegram.ui.Components.AudioVisualizerDrawable;
@@ -72,14 +66,11 @@ import org.telegram.ui.Components.CubicBezierInterpolator;
 import org.telegram.ui.Components.EarListener;
 import org.telegram.ui.Components.LayoutHelper;
 import org.telegram.ui.Components.ScaleStateListAnimator;
-import org.telegram.ui.Components.SeekBar;
 import org.telegram.ui.Components.SeekBarWaveform;
-import org.telegram.ui.Components.Text;
 import org.telegram.ui.Components.ThanosEffect;
 import org.telegram.ui.Components.TimerParticles;
 import org.telegram.ui.Components.VideoPlayer;
 import org.telegram.ui.Stories.recorder.HintView2;
-import org.telegram.ui.Stories.recorder.StoryRecorder;
 
 import java.io.File;
 
@@ -92,7 +83,7 @@ public class SecretVoicePlayer extends Dialog {
 
     private ThanosEffect thanosEffect;
 
-    private final Rect insets = new Rect();
+    private Insets insets = Insets.NONE;
     private Bitmap blurBitmap;
     private BitmapShader blurBitmapShader;
     private Paint blurBitmapPaint;
@@ -112,6 +103,8 @@ public class SecretVoicePlayer extends Dialog {
     public SecretVoicePlayer(Context context) {
         super(context, R.style.TransparentDialog);
         this.context = context;
+
+        AndroidUtilities.enableEdgeToEdge(getWindow());
 
         windowView = new FrameLayout(context) {
             @Override
@@ -194,28 +187,12 @@ public class SecretVoicePlayer extends Dialog {
         containerView.setClipToPadding(false);
         windowView.addView(containerView, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
 
-        if (Build.VERSION.SDK_INT >= 21) {
-            windowView.setFitsSystemWindows(true);
-            windowView.setOnApplyWindowInsetsListener(new View.OnApplyWindowInsetsListener() {
-                @NonNull
-                @Override
-                public WindowInsets onApplyWindowInsets(@NonNull View v, @NonNull WindowInsets insets) {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                        Insets r = insets.getInsets(WindowInsetsCompat.Type.displayCutout() | WindowInsetsCompat.Type.systemBars());
-                        SecretVoicePlayer.this.insets.set(r.left, r.top, r.right, r.bottom);
-                    } else {
-                        SecretVoicePlayer.this.insets.set(insets.getStableInsetLeft(), insets.getStableInsetTop(), insets.getStableInsetRight(), insets.getStableInsetBottom());
-                    }
-                    containerView.setPadding(SecretVoicePlayer.this.insets.left, SecretVoicePlayer.this.insets.top, SecretVoicePlayer.this.insets.right, SecretVoicePlayer.this.insets.bottom);
-                    windowView.requestLayout();
-                    if (Build.VERSION.SDK_INT >= 30) {
-                        return WindowInsets.CONSUMED;
-                    } else {
-                        return insets.consumeSystemWindowInsets();
-                    }
-                }
-            });
-        }
+        ViewCompat.setOnApplyWindowInsetsListener(windowView, (v, i) -> {
+            insets = AndroidUtilities.getDefaultWindowInsets(i, false);
+            containerView.setPadding(insets.left, insets.top, insets.right, insets.bottom);
+            windowView.requestLayout();
+            return WindowInsetsCompat.CONSUMED;
+        });
 
         if (SharedConfig.raiseToListen) {
             earListener = new EarListener(context);
@@ -258,20 +235,16 @@ public class SecretVoicePlayer extends Dialog {
         params.flags &= ~WindowManager.LayoutParams.FLAG_DIM_BEHIND;
         params.softInputMode = WindowManager.LayoutParams.SOFT_INPUT_ADJUST_NOTHING;
         params.flags |= WindowManager.LayoutParams.FLAG_ALT_FOCUSABLE_IM;
-        if (Build.VERSION.SDK_INT >= 21) {
-            params.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
-                WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR |
-                WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS |
-                WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION;
-        }
+        params.flags |= WindowManager.LayoutParams.FLAG_LAYOUT_IN_SCREEN |
+            WindowManager.LayoutParams.FLAG_LAYOUT_INSET_DECOR |
+            WindowManager.LayoutParams.FLAG_DRAWS_SYSTEM_BAR_BACKGROUNDS |
+            WindowManager.LayoutParams.FLAG_TRANSLUCENT_NAVIGATION;
         if (!BuildVars.DEBUG_PRIVATE_VERSION) {
             params.flags |= WindowManager.LayoutParams.FLAG_SECURE;
+            AndroidUtilities.logFlagSecure();
         }
         params.flags |= WindowManager.LayoutParams.FLAG_FULLSCREEN;
         params.flags |= WindowManager.LayoutParams.FLAG_KEEP_SCREEN_ON;
-        if (Build.VERSION.SDK_INT >= 28) {
-            params.layoutInDisplayCutoutMode = WindowManager.LayoutParams.LAYOUT_IN_DISPLAY_CUTOUT_MODE_SHORT_EDGES;
-        }
         window.setAttributes(params);
 
         windowView.setSystemUiVisibility(View.SYSTEM_UI_FLAG_LAYOUT_STABLE | View.SYSTEM_UI_FLAG_LAYOUT_FULLSCREEN | View.SYSTEM_UI_FLAG_FULLSCREEN);
@@ -364,7 +337,7 @@ public class SecretVoicePlayer extends Dialog {
             final int finalHeight = height;
             videoDp = (int) Math.ceil(Math.min(width, height) * .92f / AndroidUtilities.density);
 
-            myCell = new ChatMessageCell(getContext(), false, null, cell.getResourcesProvider()) {
+            myCell = new ChatMessageCell(getContext(), UserConfig.selectedAccount, false, null, cell.getResourcesProvider()) {
 
                 @Override
                 public int getBoundsLeft() {
@@ -417,6 +390,14 @@ public class SecretVoicePlayer extends Dialog {
                     if (isRound && openProgress > 0 && renderedFirstFrame) {
                         canvas.restore();
                     }
+                }
+
+                @Override
+                public void drawReactionsLayout(Canvas canvas, float alpha, Integer only) {
+                    canvas.save();
+                    canvas.translate(lerp(0, -reactionsLayoutInBubble.x, openProgress), lerp(cell.getBackgroundDrawableBottom() - getBackgroundDrawableBottom(), reactionsLayoutInBubble.totalHeight, openProgress));
+                    super.drawReactionsLayout(canvas, (1.0f - openProgress) * alpha, only);
+                    canvas.restore();
                 }
 
                 @Override
@@ -535,7 +516,7 @@ public class SecretVoicePlayer extends Dialog {
                     return false;
                 }
             });
-            myCell.setMessageObject(messageObject, cell.getCurrentMessagesGroup(), cell.pinnedBottom, cell.pinnedTop);
+            myCell.setMessageObject(messageObject, cell.getCurrentMessagesGroup(), cell.pinnedBottom, cell.pinnedTop, false);
             if (!isRound) {
                 audioVisualizerDrawable = new AudioVisualizerDrawable();
                 audioVisualizerDrawable.setParentView(myCell);
@@ -610,16 +591,6 @@ public class SecretVoicePlayer extends Dialog {
                         renderedFirstFrame = true;
                         myCell.invalidate();
                     });
-                }
-
-                @Override
-                public void onSurfaceTextureUpdated(SurfaceTexture surfaceTexture) {
-
-                }
-
-                @Override
-                public boolean onSurfaceDestroyed(SurfaceTexture surfaceTexture) {
-                    return false;
                 }
             });
             if (audioVisualizerDrawable != null) {
@@ -696,7 +667,7 @@ public class SecretVoicePlayer extends Dialog {
         }
         closeButton = new TextView(context);
         closeButton.setTextColor(0xFFFFFFFF);
-        closeButton.setTypeface(AndroidUtilities.getTypeface(AndroidUtilities.TYPEFACE_ROBOTO_MEDIUM));
+        closeButton.setTypeface(AndroidUtilities.bold());
         if (Theme.isCurrentThemeDark()) {
             closeButton.setBackground(Theme.createSimpleSelectorRoundRectDrawable(64, 0x20ffffff, 0x33ffffff));
         } else {
@@ -718,6 +689,7 @@ public class SecretVoicePlayer extends Dialog {
 
     @Override
     public void show() {
+        if (!AndroidUtilities.isSafeToShow(getContext())) return;
         super.show();
 
         prepareBlur(cell);
@@ -791,7 +763,7 @@ public class SecretVoicePlayer extends Dialog {
             backDialog.show();
             TextView button = (TextView) backDialog.getButton(DialogInterface.BUTTON_NEGATIVE);
             if (button != null) {
-                button.setTextColor(Theme.getColor(Theme.key_text_RedBold));
+                ThemeBind.textColor(button, Theme.key_text_RedBold);
             }
             return;
         }
@@ -845,7 +817,7 @@ public class SecretVoicePlayer extends Dialog {
             AndroidUtilities.runOnUIThread(this.closeAction);
             this.closeAction = null;
 
-            myCell.setInvalidateCallback(() -> {});
+//            myCell.setOverrideInvalidate(() -> {});
             thanosEffect = new ThanosEffect(context, null);
             windowView.addView(thanosEffect, LayoutHelper.createFrame(LayoutHelper.MATCH_PARENT, LayoutHelper.MATCH_PARENT, Gravity.FILL));
             thanosEffect.animate(myCell, 1.5f, super::dismiss);
